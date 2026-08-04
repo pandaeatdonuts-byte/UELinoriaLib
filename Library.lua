@@ -49,17 +49,17 @@ local Library = {
     -- Animation timings (seconds). Set any to 0 for instant behavior.
     Anim = {
         Toggle = 0.16;
-        Slider = 0.2;
-        SliderDrag = 0.1;
-        Dropdown = 0.2;
-        Tab = 0.18;
+        Slider = 0.38;
+        SliderDrag = 0.2;
+        Dropdown = 0.22;
+        Tab = 0.26;
         Button = 0.1;
         ColorPicker = 0.18;
         Hover = 0.12;
         DragSpeed = 22;
         DragGhost = 0.32;
         DragBlurSize = 14;
-        DragAlpha = 0.28;
+        DragAlpha = 0.14;
     };
 
     DragBlur = nil;
@@ -206,23 +206,25 @@ function Library:AddShadow(Parent, Radius)
     return nil;
 end;
 
--- Thin accent line inset so it sits cleanly inside the curve.
+-- Thin accent line inset so rounded ends follow the parent corner curve.
 function Library:AddAccentBar(Parent, Radius, ZIndex)
     Radius = Radius or Library.CornerRadius;
     ZIndex = ZIndex or 5;
 
-    local Inset = math.max(Radius, 6);
+    local Thickness = 2;
+    -- Pull in past the arc so square ends never poke out of the rounded shell.
+    local Inset = math.max(Radius + 1, 7);
 
     local Line = Library:Create('Frame', {
         BackgroundColor3 = Library.AccentColor;
         BorderSizePixel = 0;
-        Position = UDim2.new(0, Inset, 0, 1);
-        Size = UDim2.new(1, -Inset * 2, 0, 2);
+        Position = UDim2.new(0, Inset, 0, 2);
+        Size = UDim2.new(1, -Inset * 2, 0, Thickness);
         ZIndex = ZIndex;
         Parent = Parent;
     });
 
-    Library:AddCorner(Line, 1);
+    Library:AddCorner(Line, Thickness);
 
     Library:AddToRegistry(Line, {
         BackgroundColor3 = 'AccentColor';
@@ -2524,10 +2526,10 @@ do
                 Fill.Size = Goal;
             elseif Mode == 'drag' then
                 local Current = Fill.Size.X.Offset;
-                local Alpha = Library.Anim.DragAlpha or 0.28;
+                local Alpha = Library.Anim.DragAlpha or 0.14;
                 Fill.Size = UDim2.new(0, Current + (X - Current) * Alpha, 1, 0);
             else
-                Library:Tween(Fill, { Size = Goal }, Library.Anim.Slider, Enum.EasingStyle.Quart, Enum.EasingDirection.Out);
+                Library:Tween(Fill, { Size = Goal }, Library.Anim.Slider, Enum.EasingStyle.Quint, Enum.EasingDirection.Out);
             end;
         end;
 
@@ -2662,8 +2664,24 @@ do
         });
 
         Library:ApplyRound(DropdownOuter, 6, 'OutlineColor');
+        local DropdownCorner = DropdownOuter:FindFirstChildOfClass('UICorner');
 
         Library:AddToRegistry(DropdownOuter, {
+            BackgroundColor3 = 'MainColor';
+        });
+
+        -- Covers the header's bottom curve so the open list can sit flush against it.
+        local HeaderSeam = Library:Create('Frame', {
+            BackgroundColor3 = Library.MainColor;
+            BorderSizePixel = 0;
+            Position = UDim2.new(0, 0, 1, -6);
+            Size = UDim2.new(1, 0, 0, 6);
+            Visible = false;
+            ZIndex = 6;
+            Parent = DropdownOuter;
+        });
+
+        Library:AddToRegistry(HeaderSeam, {
             BackgroundColor3 = 'MainColor';
         });
 
@@ -2726,11 +2744,29 @@ do
         });
 
         Library:ApplyRound(ListOuter, 6, 'OutlineColor');
+        local ListCorner = ListOuter:FindFirstChildOfClass('UICorner');
+
+        local ListSeam = Library:Create('Frame', {
+            BackgroundColor3 = Library.MainColor;
+            BorderSizePixel = 0;
+            Position = UDim2.new(0, 0, 0, 0);
+            Size = UDim2.new(1, 0, 0, 6);
+            ZIndex = 22;
+            Parent = ListOuter;
+        });
+
+        Library:AddToRegistry(ListSeam, {
+            BackgroundColor3 = 'MainColor';
+        });
 
         local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + 2;
 
         local function RecalculateListPosition()
-            ListOuter.Position = UDim2.fromOffset(DropdownOuter.AbsolutePosition.X, DropdownOuter.AbsolutePosition.Y + DropdownOuter.Size.Y.Offset + 1);
+            -- Sit flush under the header (1px overlap = seamless join).
+            ListOuter.Position = UDim2.fromOffset(
+                DropdownOuter.AbsolutePosition.X,
+                DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y - 1
+            );
         end;
 
         local function RecalculateListSize(YSize)
@@ -2837,8 +2873,7 @@ do
 
                 local Button = Library:Create('Frame', {
                     BackgroundColor3 = Library.MainColor;
-                    BorderColor3 = Library.OutlineColor;
-                    BorderMode = Enum.BorderMode.Middle;
+                    BorderSizePixel = 0;
                     Size = UDim2.new(1, -1, 0, 20);
                     ZIndex = 23;
                     Active = true,
@@ -2847,8 +2882,24 @@ do
 
                 Library:AddToRegistry(Button, {
                     BackgroundColor3 = 'MainColor';
-                    BorderColor3 = 'OutlineColor';
                 });
+
+                if Count > 1 then
+                    local Separator = Library:Create('Frame', {
+                        BackgroundColor3 = Library.OutlineColor;
+                        BorderSizePixel = 0;
+                        Position = UDim2.new(0, 8, 0, 0);
+                        Size = UDim2.new(1, -16, 0, 1);
+                        ZIndex = 24;
+                        Parent = Button;
+                    });
+
+                    Library:AddCorner(Separator, 1);
+
+                    Library:AddToRegistry(Separator, {
+                        BackgroundColor3 = 'OutlineColor';
+                    });
+                end;
 
                 local ButtonLabel = Library:CreateLabel({
                     Active = false;
@@ -2862,8 +2913,8 @@ do
                 });
 
                 Library:OnHighlight(Button, Button,
-                    { BorderColor3 = 'AccentColor', ZIndex = 24 },
-                    { BorderColor3 = 'OutlineColor', ZIndex = 23 }
+                    { BackgroundColor3 = 'BackgroundColor', ZIndex = 24 },
+                    { BackgroundColor3 = 'MainColor', ZIndex = 23 }
                 );
 
                 local Selected;
@@ -2948,11 +2999,20 @@ do
             ListOuter:SetAttribute('Closing', false);
             ListOuter.Visible = true;
             Library.OpenedFrames[ListOuter] = true;
+            RecalculateListPosition();
             ListOuter.Size = UDim2.fromOffset(DropdownOuter.AbsoluteSize.X, 0);
+
+            HeaderSeam.Visible = true;
+            if DropdownCorner then
+                DropdownCorner.CornerRadius = UDim.new(0, 6);
+            end;
+            if ListCorner then
+                ListCorner.CornerRadius = UDim.new(0, 6);
+            end;
 
             Library:Tween(ListOuter, {
                 Size = UDim2.fromOffset(DropdownOuter.AbsoluteSize.X, DropdownListHeight);
-            }, Library.Anim.Dropdown, Enum.EasingStyle.Quart, Enum.EasingDirection.Out);
+            }, Library.Anim.Dropdown, Enum.EasingStyle.Quint, Enum.EasingDirection.Out);
 
             Library:Tween(DropdownArrow, { Rotation = 180 }, Library.Anim.Dropdown);
         end;
@@ -2966,7 +3026,7 @@ do
 
             Library:Tween(ListOuter, {
                 Size = UDim2.fromOffset(DropdownOuter.AbsoluteSize.X, 0);
-            }, Library.Anim.Dropdown * 0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.In);
+            }, Library.Anim.Dropdown * 0.85, Enum.EasingStyle.Quint, Enum.EasingDirection.In);
 
             Library:Tween(DropdownArrow, { Rotation = 0 }, Library.Anim.Dropdown);
 
@@ -2974,6 +3034,7 @@ do
                 if ListOuter:GetAttribute('CloseToken') == Token and ListOuter:GetAttribute('Closing') then
                     ListOuter.Visible = false;
                     ListOuter:SetAttribute('Closing', false);
+                    HeaderSeam.Visible = false;
                 end;
             end);
         end;
@@ -3023,7 +3084,7 @@ do
                 local AbsPos, AbsSize = ListOuter.AbsolutePosition, ListOuter.AbsoluteSize;
 
                 if Mouse.X < AbsPos.X or Mouse.X > AbsPos.X + AbsSize.X
-                    or Mouse.Y < (AbsPos.Y - 20 - 1) or Mouse.Y > AbsPos.Y + AbsSize.Y then
+                    or Mouse.Y < (AbsPos.Y - DropdownOuter.AbsoluteSize.Y) or Mouse.Y > AbsPos.Y + AbsSize.Y then
 
                     Dropdown:CloseDropdown();
                 end;
@@ -3587,11 +3648,11 @@ function Library:CreateWindow(...)
         });
 
         local TabIndicator = Library:Create('Frame', {
-            AnchorPoint = Vector2.new(0.5, 0);
+            AnchorPoint = Vector2.new(0.5, 1);
             BackgroundColor3 = Library.AccentColor;
             BorderSizePixel = 0;
-            Position = UDim2.new(0.5, 0, 0, 0);
-            Size = UDim2.new(1, 0, 0, 3);
+            Position = UDim2.new(0.5, 0, 1, 0);
+            Size = UDim2.new(1, -10, 0, 2);
             Visible = false;
             ZIndex = 4;
             Parent = TabButton;
@@ -3663,12 +3724,6 @@ function Library:CreateWindow(...)
 
         local function FadeTab(Frame, Show)
             local Duration = Library.Anim.Tab;
-            local Offset = Show and 6 or -6;
-
-            Frame.Position = UDim2.new(0, Show and Offset or 0, 0, 0);
-            Library:Tween(Frame, {
-                Position = UDim2.new(0, Show and 0 or -Offset, 0, 0);
-            }, Duration, Enum.EasingStyle.Quart, Enum.EasingDirection.Out);
 
             for _, Desc in next, Frame:GetDescendants() do
                 if Desc:IsA('TextLabel') or Desc:IsA('TextBox') then
@@ -3680,11 +3735,19 @@ function Library:CreateWindow(...)
 
                     if Show then
                         Desc.TextTransparency = 1;
-                        Library:Tween(Desc, { TextTransparency = Stored }, Duration);
+                        Library:Tween(Desc, { TextTransparency = Stored }, Duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
                     else
-                        Library:Tween(Desc, { TextTransparency = 1 }, Duration * 0.7);
+                        Library:Tween(Desc, { TextTransparency = 1 }, Duration * 0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In);
                     end;
                 end;
+            end;
+
+            -- Soft vertical settle instead of a hard horizontal slide.
+            if Show then
+                Frame.Position = UDim2.new(0, 0, 0, 4);
+                Library:Tween(Frame, {
+                    Position = UDim2.new(0, 0, 0, 0);
+                }, Duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out);
             end;
         end;
 
@@ -3696,8 +3759,8 @@ function Library:CreateWindow(...)
             TabButton.BackgroundColor3 = Library.MainColor;
             Library.RegistryMap[TabButton].Properties.BackgroundColor3 = 'MainColor';
             TabIndicator.Visible = true;
-            TabIndicator.Size = UDim2.new(0, 0, 0, 3);
-            Library:Tween(TabIndicator, { Size = UDim2.new(1, 0, 0, 3) }, Library.Anim.Tab);
+            TabIndicator.Size = UDim2.new(0, 0, 0, 2);
+            Library:Tween(TabIndicator, { Size = UDim2.new(1, -10, 0, 2) }, Library.Anim.Tab, Enum.EasingStyle.Quint, Enum.EasingDirection.Out);
             TabFrame.Visible = true;
             FadeTab(TabFrame, true);
         end;
@@ -3881,7 +3944,7 @@ function Library:CreateWindow(...)
                     BackgroundColor3 = Library.AccentColor;
                     BorderSizePixel = 0;
                     Position = UDim2.new(0.5, 0, 1, 0);
-                    Size = UDim2.new(1, 0, 0, 3);
+                    Size = UDim2.new(1, -10, 0, 2);
                     Visible = false;
                     ZIndex = 10;
                     Parent = Button;
@@ -3939,8 +4002,8 @@ function Library:CreateWindow(...)
                     Container.Visible = true;
                     Block.Visible = true;
                     TabHighlight.Visible = true;
-                    TabHighlight.Size = UDim2.new(0, 0, 0, 3);
-                    Library:Tween(TabHighlight, { Size = UDim2.new(1, 0, 0, 3) }, Library.Anim.Tab);
+                    TabHighlight.Size = UDim2.new(0, 0, 0, 2);
+                    Library:Tween(TabHighlight, { Size = UDim2.new(1, -10, 0, 2) }, Library.Anim.Tab, Enum.EasingStyle.Quint, Enum.EasingDirection.Out);
 
                     Button.BackgroundColor3 = Library.BackgroundColor;
                     Library.RegistryMap[Button].Properties.BackgroundColor3 = 'BackgroundColor';
