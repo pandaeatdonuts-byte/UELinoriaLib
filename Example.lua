@@ -1,25 +1,26 @@
 -- Example menu for the rebuilt UE-styled LinoriaLib.
+-- IMPORTANT: re-paste THIS whole script into your executor (old pastes load a cached Library).
 
--- Pin to a commit SHA in the *path* (many executors ignore ?query= cache busts on raw.githubusercontent.com).
-local COMMIT = 'db37bda71bf66f84f98caeff265a62171ea86945'
+local VERSION = '5'
 local bases = {
-    ('https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/%s/'):format(COMMIT),
-    ('https://cdn.jsdelivr.net/gh/pandaeatdonuts-byte/UELinoriaLib@%s/'):format(COMMIT),
+    ('https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/main/v/%s/'):format(VERSION),
+    ('https://cdn.jsdelivr.net/gh/pandaeatdonuts-byte/UELinoriaLib@main/v/%s/'):format(VERSION),
 }
 
-local function loadLib(path)
+local function loadLib(fileName, marker)
     local lastErr
 
     for _, base in ipairs(bases) do
-        local ok, source = pcall(game.HttpGet, game, base .. path)
+        local url = base .. fileName .. '?v=' .. VERSION .. '&r=' .. tostring(math.random(1, 1e9))
+        local ok, source = pcall(game.HttpGet, game, url)
         if ok and type(source) == 'string' and #source > 0 then
-            if path == 'Library.lua' and not source:find('function Library:AddToolTip', 1, true) then
-                lastErr = 'got a stale/broken Library.lua (missing AddToolTip) from ' .. base
+            if marker and not source:find(marker, 1, true) then
+                lastErr = ('stale %s from %s (missing %s)'):format(fileName, base, marker)
             else
                 local chunk, err = loadstring(source)
                 if chunk then
                     local result = chunk()
-                    assert(result, ('%s did not return a library table'):format(path))
+                    assert(result, ('%s did not return a library table'):format(fileName))
                     return result
                 end
                 lastErr = tostring(err)
@@ -29,12 +30,15 @@ local function loadLib(path)
         end
     end
 
-    error(('Failed to load %s: %s'):format(path, tostring(lastErr)))
+    error(('Failed to load %s: %s'):format(fileName, tostring(lastErr)))
 end
 
-local Library = loadLib('Library.lua')
-local ThemeManager = loadLib('addons/ThemeManager.lua')
-local SaveManager = loadLib('addons/SaveManager.lua')
+local Library = loadLib('Library.lua', 'HeaderSeam')
+assert(Library.Version == '5.0.0', 'Wrong Library version — re-copy Example.lua from the repo')
+print('[UELinoria] loaded', Library.Version)
+
+local ThemeManager = loadLib('ThemeManager.lua')
+local SaveManager = loadLib('SaveManager.lua')
 
 local Window = Library:CreateWindow({
     -- Set Center to true if you want the menu to appear in the center
