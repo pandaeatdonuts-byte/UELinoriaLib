@@ -2,9 +2,19 @@
 
 local repo = 'https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/main/'
 
-local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
-local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
-local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+local function loadLib(path)
+    local source = game:HttpGet(repo .. path)
+    local chunk, err = loadstring(source)
+    assert(chunk, ('Failed to compile %s: %s'):format(path, tostring(err)))
+
+    local result = chunk()
+    assert(result, ('%s did not return a library table'):format(path))
+    return result
+end
+
+local Library = loadLib('Library.lua')
+local ThemeManager = loadLib('addons/ThemeManager.lua')
+local SaveManager = loadLib('addons/SaveManager.lua')
 
 local Window = Library:CreateWindow({
     -- Set Center to true if you want the menu to appear in the center
