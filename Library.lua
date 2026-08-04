@@ -47,16 +47,21 @@ local Library = {
 
     -- Animation timings (seconds). Set any to 0 for instant behavior.
     Anim = {
-        Toggle = 0.18;
-        Slider = 0.22;
-        SliderDrag = 0.12;
-        Dropdown = 0.22;
-        Tab = 0.2;
-        Button = 0.12;
-        ColorPicker = 0.2;
-        Hover = 0.14;
-        DragAlpha = 0.22; -- lower = more delayed window/slider follow
+        Toggle = 0.16;
+        Slider = 0.2;
+        SliderDrag = 0.1;
+        Dropdown = 0.2;
+        Tab = 0.18;
+        Button = 0.1;
+        ColorPicker = 0.18;
+        Hover = 0.12;
+        DragSpeed = 22;
+        DragGhost = 0.32;
+        DragBlurSize = 14;
+        DragAlpha = 0.28;
     };
+
+    DragBlur = nil;
 };
 
 Library._ActiveTweens = setmetatable({}, { __mode = 'k' });
@@ -181,31 +186,36 @@ function Library:Create(Class, Properties)
     return _Instance;
 end;
 
-Library.CornerRadius = 7;
+Library.CornerRadius = 8;
 
 function Library:AddCorner(Parent, Radius)
+    local Corner = Parent:FindFirstChildOfClass('UICorner');
+    if Corner then
+        Corner.CornerRadius = UDim.new(0, Radius or Library.CornerRadius);
+        return Corner;
+    end;
+
     return Library:Create('UICorner', {
         CornerRadius = UDim.new(0, Radius or Library.CornerRadius);
         Parent = Parent;
     });
 end;
 
--- Soft depth without the muddy image blob shadows.
 function Library:AddShadow(Parent, Radius)
     return nil;
 end;
 
--- Thin accent line that sits inside the curve instead of a fat header strip.
+-- Thin accent line inset so it sits cleanly inside the curve.
 function Library:AddAccentBar(Parent, Radius, ZIndex)
     Radius = Radius or Library.CornerRadius;
     ZIndex = ZIndex or 5;
 
-    local Inset = math.max(Radius - 1, 4);
+    local Inset = math.max(Radius, 6);
 
     local Line = Library:Create('Frame', {
         BackgroundColor3 = Library.AccentColor;
         BorderSizePixel = 0;
-        Position = UDim2.new(0, Inset, 0, 0);
+        Position = UDim2.new(0, Inset, 0, 1);
         Size = UDim2.new(1, -Inset * 2, 0, 2);
         ZIndex = ZIndex;
         Parent = Parent;
@@ -220,33 +230,30 @@ function Library:AddAccentBar(Parent, Radius, ZIndex)
     return Line;
 end;
 
--- Rounds a frame. Stroke only — no drop shadows.
--- WithShadow kept for API compat but ignored.
+-- Single clean corner + stroke. No double-shells, no image shadows.
 function Library:ApplyRound(Parent, Radius, StrokeColorKey, WithShadow)
     Radius = Radius or Library.CornerRadius;
     Parent.BorderSizePixel = 0;
 
-    local Existing = Parent:FindFirstChildOfClass('UICorner');
-    if Existing then
-        Existing.CornerRadius = UDim.new(0, Radius);
-    else
-        Library:AddCorner(Parent, Radius);
-    end;
+    Library:AddCorner(Parent, Radius);
 
-    -- Strip any leftover ugly DropShadow images from older builds.
     local Junk = Parent:FindFirstChild('DropShadow');
     if Junk then
         Junk:Destroy();
     end;
 
     if StrokeColorKey == false then
+        local Old = Parent:FindFirstChild('RoundStroke');
+        if Old then
+            Old:Destroy();
+        end;
         return nil;
     end;
 
     local ColorName = StrokeColorKey or 'OutlineColor';
-    local Stroke = Parent:FindFirstChildOfClass('UIStroke');
+    local Stroke = Parent:FindFirstChild('RoundStroke');
 
-    if not Stroke or Stroke.Name == 'TextStroke' then
+    if not Stroke then
         Stroke = Library:Create('UIStroke', {
             Name = 'RoundStroke';
             Color = Library[ColorName] or Library.OutlineColor;
@@ -257,6 +264,7 @@ function Library:ApplyRound(Parent, Radius, StrokeColorKey, WithShadow)
         });
     else
         Stroke.Color = Library[ColorName] or Library.OutlineColor;
+        Stroke.Thickness = 1;
         Stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border;
         Stroke.LineJoinMode = Enum.LineJoinMode.Round;
     end;
@@ -297,46 +305,136 @@ function Library:CreateLabel(Properties, IsHud)
     return Library:Create(_Instance, Properties);
 end;
 
-function Library:MakeDraggable(Instance, Cutoff)
+function Library:EnsureDragBlur()
+    if Library.DragBlur and Library.DragBlur.Parent then
+        return Library.DragBlur;
+    end;
+
+    local Blur = Instance.new('BlurEffect');
+    Blur.Name = 'LinoriaDragBlur';
+    Blur.Size = 0;
+    Blur.Enabled = false;
+    pcall(function()
+        Blur.Parent = game:GetService('Lighting');
+    end);
+
+    Library.DragBlur = Blur;
+    return Blur;
+end;
+
+function Library:SetDragVisual(Instance, Enabled)
+    local Ghost = Library.Anim.DragGhost or 0.3;
+    local BlurSize = Library.Anim.DragBlurSize or 12;
+
+    if Instance:IsA('CanvasGroup') then
+        Library:Tween(Instance, {
+            GroupTransparency = Enabled and Ghost or 0;
+        }, 0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
+    else
+        Library:Tween(Instance, {
+            BackgroundTransparency = Enabled and (Ghost * 0.75) or 0;
+        }, 0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
+    end;
+
+    local Blur = Library:EnsureDragBlur();
+    if Enabled then
+        Blur.Enabled = true;
+        Library:Tween(Blur, { Size = BlurSize }, 0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
+    else
+        local Tween = Library:Tween(Blur, { Size = 0 }, 0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
+        if Tween then
+            Tween.Completed:Connect(function()
+                if Blur.Size < 0.5 then
+                    Blur.Enabled = false;
+                end;
+            end);
+        else
+            Blur.Enabled = false;
+        end;
+    end;
+end;
+
+-- Smooth drag that converts Scale positions to Offset (fixes the "spawn under mouse" bug).
+function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag)
     Instance.Active = true;
 
-    Instance.InputBegan:Connect(function(Input)
-        if Input.UserInputType == Enum.UserInputType.MouseButton1 then
-            local ObjPos = Vector2.new(
-                Mouse.X - Instance.AbsolutePosition.X,
-                Mouse.Y - Instance.AbsolutePosition.Y
-            );
+    local Dragging = false;
+    local MoveConn = nil;
+    local GrabOffset = Vector2.zero;
 
-            if ObjPos.Y > (Cutoff or 40) then
+    local function StopDrag()
+        if not Dragging then
+            return;
+        end;
+
+        Dragging = false;
+
+        if MoveConn then
+            MoveConn:Disconnect();
+            MoveConn = nil;
+        end;
+
+        if GhostWhileDrag then
+            Library:SetDragVisual(Instance, false);
+        end;
+    end;
+
+    Instance.InputBegan:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+            return;
+        end;
+
+        local Rel = Vector2.new(
+            Mouse.X - Instance.AbsolutePosition.X,
+            Mouse.Y - Instance.AbsolutePosition.Y
+        );
+
+        if Rel.Y > (Cutoff or 40) then
+            return;
+        end;
+
+        -- Lock to offset-space using the current on-screen center/position.
+        local AbsPos = Instance.AbsolutePosition;
+        local AbsSize = Instance.AbsoluteSize;
+        local Anchor = Instance.AnchorPoint;
+        local PosX = AbsPos.X + AbsSize.X * Anchor.X;
+        local PosY = AbsPos.Y + AbsSize.Y * Anchor.Y;
+
+        Instance.Position = UDim2.fromOffset(PosX, PosY);
+        GrabOffset = Vector2.new(Mouse.X - PosX, Mouse.Y - PosY);
+        Dragging = true;
+
+        if GhostWhileDrag then
+            Library:SetDragVisual(Instance, true);
+        end;
+
+        if MoveConn then
+            MoveConn:Disconnect();
+        end;
+
+        MoveConn = RenderStepped:Connect(function(Dt)
+            if not Dragging then
                 return;
             end;
 
-            local Alpha = Library.Anim.DragAlpha or 0.12;
+            local TargetX = Mouse.X - GrabOffset.X;
+            local TargetY = Mouse.Y - GrabOffset.Y;
+            local CurrentX = Instance.Position.X.Offset;
+            local CurrentY = Instance.Position.Y.Offset;
+            local Alpha = 1 - math.exp(-(Library.Anim.DragSpeed or 22) * Dt);
 
-            while InputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
-                local TargetX = Mouse.X - ObjPos.X + (Instance.Size.X.Offset * Instance.AnchorPoint.X);
-                local TargetY = Mouse.Y - ObjPos.Y + (Instance.Size.Y.Offset * Instance.AnchorPoint.Y);
-                local CurrentX = Instance.Position.X.Offset;
-                local CurrentY = Instance.Position.Y.Offset;
+            Instance.Position = UDim2.fromOffset(
+                CurrentX + (TargetX - CurrentX) * Alpha,
+                CurrentY + (TargetY - CurrentY) * Alpha
+            );
+        end);
+    end);
 
-                Instance.Position = UDim2.new(
-                    Instance.Position.X.Scale,
-                    CurrentX + (TargetX - CurrentX) * Alpha,
-                    Instance.Position.Y.Scale,
-                    CurrentY + (TargetY - CurrentY) * Alpha
-                );
-
-                RenderStepped:Wait();
-            end;
-
-            local FinalX = Mouse.X - ObjPos.X + (Instance.Size.X.Offset * Instance.AnchorPoint.X);
-            local FinalY = Mouse.Y - ObjPos.Y + (Instance.Size.Y.Offset * Instance.AnchorPoint.Y);
-
-            Library:Tween(Instance, {
-                Position = UDim2.new(Instance.Position.X.Scale, FinalX, Instance.Position.Y.Scale, FinalY);
-            }, 0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out);
+    Library:GiveSignal(InputService.InputEnded:Connect(function(Input)
+        if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            StopDrag();
         end;
-    end)
+    end));
 end;
 
 function Library:AddToolTip(InfoStr, HoverInstance)
@@ -2297,9 +2395,9 @@ do
             if Mode == true then
                 Fill.Size = Goal;
             elseif Mode == 'drag' then
-                local Alpha = Library.Anim.DragAlpha or 0.12;
                 local Current = Fill.Size.X.Offset;
-                Fill.Size = UDim2.new(0, Current + (X - Current) * math.min(Alpha * 2.2, 0.35), 1, 0);
+                local Alpha = Library.Anim.DragAlpha or 0.28;
+                Fill.Size = UDim2.new(0, Current + (X - Current) * Alpha, 1, 0);
             else
                 Library:Tween(Fill, { Size = Goal }, Library.Anim.Slider, Enum.EasingStyle.Quart, Enum.EasingDirection.Out);
             end;
@@ -3168,10 +3266,11 @@ function Library:CreateWindow(...)
         Tabs = {};
     };
 
-    local Outer = Library:Create('Frame', {
+    local Outer = Library:Create('CanvasGroup', {
         AnchorPoint = Config.AnchorPoint,
         BackgroundColor3 = Library.MainColor;
         BorderSizePixel = 0;
+        GroupTransparency = 0;
         Position = Config.Position,
         Size = Config.Size,
         Visible = false;
@@ -3180,22 +3279,17 @@ function Library:CreateWindow(...)
     });
 
     Library:ApplyRound(Outer, 8, 'OutlineColor');
-    Library:MakeDraggable(Outer, 25);
+    Library:AddToRegistry(Outer, {
+        BackgroundColor3 = 'MainColor';
+    });
+    Library:MakeDraggable(Outer, 25, true);
 
     local Inner = Library:Create('Frame', {
-        BackgroundColor3 = Library.MainColor;
+        BackgroundTransparency = 1;
         BorderSizePixel = 0;
-        ClipsDescendants = true;
-        Position = UDim2.new(0, 1, 0, 1);
-        Size = UDim2.new(1, -2, 1, -2);
+        Size = UDim2.new(1, 0, 1, 0);
         ZIndex = 1;
         Parent = Outer;
-    });
-
-    Library:ApplyRound(Inner, 7, false);
-
-    Library:AddToRegistry(Inner, {
-        BackgroundColor3 = 'MainColor';
     });
 
     local WindowLabel = Library:CreateLabel({
@@ -3245,21 +3339,19 @@ function Library:CreateWindow(...)
         Parent = Inner;
     });
 
-    Library:ApplyRound(TabBarOuter, 7, 'OutlineColor');
+    Library:ApplyRound(TabBarOuter, 6, 'OutlineColor');
 
     Library:AddToRegistry(TabBarOuter, {
         BackgroundColor3 = 'BackgroundColor';
     });
 
     local TabBarInner = Library:Create('Frame', {
-        BackgroundColor3 = Library.BackgroundColor;
+        BackgroundTransparency = 1;
         BorderSizePixel = 0;
         Size = UDim2.new(1, 0, 1, 0);
         ZIndex = 1;
         Parent = TabBarOuter;
     });
-
-    Library:ApplyRound(TabBarInner, 6, false);
 
     Library:AddToRegistry(TabBarInner, {
         BackgroundColor3 = 'BackgroundColor';
@@ -3289,23 +3381,19 @@ function Library:CreateWindow(...)
         Parent = Inner;
     });
 
-    Library:ApplyRound(MainSectionOuter, 7, 'OutlineColor');
+    Library:ApplyRound(MainSectionOuter, 6, 'OutlineColor');
 
     Library:AddToRegistry(MainSectionOuter, {
         BackgroundColor3 = 'BackgroundColor';
     });
 
     local MainSectionInner = Library:Create('Frame', {
-        BackgroundColor3 = Library.BackgroundColor;
+        BackgroundTransparency = 1;
         BorderSizePixel = 0;
-        ClipsDescendants = true;
-        Position = UDim2.new(0, 0, 0, 0);
         Size = UDim2.new(1, 0, 1, 0);
         ZIndex = 1;
         Parent = MainSectionOuter;
     });
-
-    Library:ApplyRound(MainSectionInner, 6, false);
 
     Library:AddToRegistry(MainSectionInner, {
         BackgroundColor3 = 'BackgroundColor';
@@ -3320,7 +3408,7 @@ function Library:CreateWindow(...)
         Parent = MainSectionInner;
     });
 
-    Library:ApplyRound(TabContainer, 7, 'OutlineColor');
+    Library:ApplyRound(TabContainer, 6, 'OutlineColor');
 
     Library:AddToRegistry(TabContainer, {
         BackgroundColor3 = 'MainColor';
@@ -3514,29 +3602,25 @@ function Library:CreateWindow(...)
                 Parent = Info.Side == 1 and LeftSide or RightSide;
             });
 
-            Library:ApplyRound(BoxOuter, 7, 'OutlineColor');
+            Library:ApplyRound(BoxOuter, 6, 'OutlineColor');
 
             Library:AddToRegistry(BoxOuter, {
                 BackgroundColor3 = 'BackgroundColor';
             });
 
             local BoxInner = Library:Create('Frame', {
-                BackgroundColor3 = Library.BackgroundColor;
+                BackgroundTransparency = 1;
                 BorderSizePixel = 0;
-                ClipsDescendants = true;
-                Size = UDim2.new(1, -2, 1, -2);
-                Position = UDim2.new(0, 1, 0, 1);
+                Size = UDim2.new(1, 0, 1, 0);
                 ZIndex = 4;
                 Parent = BoxOuter;
             });
-
-            Library:ApplyRound(BoxInner, 6, false);
 
             Library:AddToRegistry(BoxInner, {
                 BackgroundColor3 = 'BackgroundColor';
             });
 
-            local Highlight = Library:AddAccentBar(BoxInner, 7, 5);
+            local Highlight = Library:AddAccentBar(BoxOuter, 6, 5);
 
             local GroupboxLabel = Library:CreateLabel({
                 Size = UDim2.new(1, 0, 0, 18);
@@ -3606,29 +3690,25 @@ function Library:CreateWindow(...)
                 Parent = Info.Side == 1 and LeftSide or RightSide;
             });
 
-            Library:ApplyRound(BoxOuter, 7, 'OutlineColor');
+            Library:ApplyRound(BoxOuter, 6, 'OutlineColor');
 
             Library:AddToRegistry(BoxOuter, {
                 BackgroundColor3 = 'BackgroundColor';
             });
 
             local BoxInner = Library:Create('Frame', {
-                BackgroundColor3 = Library.BackgroundColor;
+                BackgroundTransparency = 1;
                 BorderSizePixel = 0;
-                ClipsDescendants = true;
-                Size = UDim2.new(1, -2, 1, -2);
-                Position = UDim2.new(0, 1, 0, 1);
+                Size = UDim2.new(1, 0, 1, 0);
                 ZIndex = 4;
                 Parent = BoxOuter;
             });
-
-            Library:ApplyRound(BoxInner, 6, false);
 
             Library:AddToRegistry(BoxInner, {
                 BackgroundColor3 = 'BackgroundColor';
             });
 
-            local Highlight = Library:AddAccentBar(BoxInner, 7, 10);
+            local Highlight = Library:AddAccentBar(BoxOuter, 6, 10);
 
             local TabboxButtons = Library:Create('Frame', {
                 BackgroundTransparency = 1;
@@ -3831,7 +3911,6 @@ function Library:CreateWindow(...)
         Parent = ScreenGui;
     });
 
-    local TransparencyCache = {};
     local Toggled = false;
     local Fading = false;
 
@@ -3846,11 +3925,10 @@ function Library:CreateWindow(...)
         ModalElement.Modal = Toggled;
 
         if Toggled then
-            -- A bit scuffed, but if we're going from not toggled -> toggled we want to show the frame immediately so that the fade is visible.
             Outer.Visible = true;
+            Outer.GroupTransparency = 1;
 
             task.spawn(function()
-                -- TODO: add cursor fade?
                 local State = InputService.MouseIconEnabled;
 
                 local Cursor = Drawing.new('Triangle');
@@ -3889,44 +3967,18 @@ function Library:CreateWindow(...)
             end);
         end;
 
-        for _, Desc in next, Outer:GetDescendants() do
-            local Properties = {};
+        -- Fast path: CanvasGroup fades the whole window in one tween.
+        local FadeTween = Library:Tween(Outer, {
+            GroupTransparency = Toggled and 0 or 1;
+        }, FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
 
-            if Desc:IsA('ImageLabel') then
-                table.insert(Properties, 'ImageTransparency');
-                table.insert(Properties, 'BackgroundTransparency');
-            elseif Desc:IsA('TextLabel') or Desc:IsA('TextBox') then
-                table.insert(Properties, 'TextTransparency');
-            elseif Desc:IsA('Frame') or Desc:IsA('ScrollingFrame') then
-                table.insert(Properties, 'BackgroundTransparency');
-            elseif Desc:IsA('UIStroke') then
-                table.insert(Properties, 'Transparency');
-            end;
-
-            local Cache = TransparencyCache[Desc];
-
-            if (not Cache) then
-                Cache = {};
-                TransparencyCache[Desc] = Cache;
-            end;
-
-            for _, Prop in next, Properties do
-                if not Cache[Prop] then
-                    Cache[Prop] = Desc[Prop];
-                end;
-
-                if Cache[Prop] == 1 then
-                    continue;
-                end;
-
-                TweenService:Create(Desc, TweenInfo.new(FadeTime, Enum.EasingStyle.Linear), { [Prop] = Toggled and Cache[Prop] or 1 }):Play();
-            end;
+        if FadeTween then
+            FadeTween.Completed:Wait();
+        else
+            task.wait(FadeTime);
         end;
 
-        task.wait(FadeTime);
-
         Outer.Visible = Toggled;
-
         Fading = false;
     end
 
