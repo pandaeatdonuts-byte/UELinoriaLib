@@ -563,6 +563,8 @@ function Library:MakeResizable(Instance, MinSize, MaxSize, GhostWhileResize)
 
     return Grip;
 end;
+
+function Library:AddToolTip(InfoStr, HoverInstance)
     local X, Y = Library:GetTextBounds(InfoStr, Library.Font, 14);
     local Tooltip = Library:Create('Frame', {
         BackgroundColor3 = Library.MainColor,
