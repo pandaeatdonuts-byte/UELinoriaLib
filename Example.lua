@@ -1,16 +1,35 @@
 -- Example menu for the rebuilt UE-styled LinoriaLib.
 
-local repo = 'https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/main/'
-local bust = tostring(tick()) -- busts executor / CDN HttpGet caches
+-- Pin to a commit SHA in the *path* (many executors ignore ?query= cache busts on raw.githubusercontent.com).
+local COMMIT = 'dfce52f42a6a6a0c0f3722869ac1e23c2111b7dc'
+local bases = {
+    ('https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/%s/'):format(COMMIT),
+    ('https://cdn.jsdelivr.net/gh/pandaeatdonuts-byte/UELinoriaLib@%s/'):format(COMMIT),
+}
 
 local function loadLib(path)
-    local source = game:HttpGet(repo .. path .. '?t=' .. bust)
-    local chunk, err = loadstring(source)
-    assert(chunk, ('Failed to compile %s: %s'):format(path, tostring(err)))
+    local lastErr
 
-    local result = chunk()
-    assert(result, ('%s did not return a library table'):format(path))
-    return result
+    for _, base in ipairs(bases) do
+        local ok, source = pcall(game.HttpGet, game, base .. path)
+        if ok and type(source) == 'string' and #source > 0 then
+            if path == 'Library.lua' and not source:find('function Library:AddToolTip', 1, true) then
+                lastErr = 'got a stale/broken Library.lua (missing AddToolTip) from ' .. base
+            else
+                local chunk, err = loadstring(source)
+                if chunk then
+                    local result = chunk()
+                    assert(result, ('%s did not return a library table'):format(path))
+                    return result
+                end
+                lastErr = tostring(err)
+            end
+        else
+            lastErr = tostring(source)
+        end
+    end
+
+    error(('Failed to load %s: %s'):format(path, tostring(lastErr)))
 end
 
 local Library = loadLib('Library.lua')
