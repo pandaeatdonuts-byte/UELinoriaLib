@@ -1,4 +1,3 @@
--- CACHE_BUST_VERSION=16
 local InputService = game:GetService('UserInputService');
 local TextService = game:GetService('TextService');
 local CoreGui = game:GetService('CoreGui');
@@ -30,8 +29,6 @@ local Library = {
     RegistryMap = {};
 
     HudRegistry = {};
-
-    Version = '16.0.0';
 
     FontColor = Color3.fromRGB(255, 255, 255);
     MainColor = Color3.fromRGB(28, 28, 28);
@@ -4308,10 +4305,6 @@ function Library:CreateWindow(...)
     if Config.AutoShow then task.spawn(Library.Toggle) end
 
     Window.Holder = Outer;
-
-    task.defer(function()
-        Library:Notify(('UELinoria %s loaded'):format(Library.Version or '?'), 4);
-    end);
 
     return Window;
 end;

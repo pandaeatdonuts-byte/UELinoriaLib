@@ -1,44 +1,22 @@
--- Example menu for the rebuilt UE-styled LinoriaLib.
--- IMPORTANT: re-paste THIS whole script into your executor (old pastes load a cached Library).
+-- Example menu for this Linoria fork.
+-- Re-paste the whole script if raw GitHub caches an old copy.
 
-local VERSION = '16'
-local bases = {
-    ('https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/main/v/%s/'):format(VERSION),
-    ('https://cdn.jsdelivr.net/gh/pandaeatdonuts-byte/UELinoriaLib@main/v/%s/'):format(VERSION),
-}
+local repo = 'https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/main/'
 
-local function loadLib(fileName, marker)
-    local lastErr
+local function loadLib(path)
+    local url = repo .. path .. '?r=' .. tostring(math.random(1, 1e9))
+    local source = game:HttpGet(url)
+    local chunk, err = loadstring(source)
+    assert(chunk, ('Failed to compile %s: %s'):format(path, tostring(err)))
 
-    for _, base in ipairs(bases) do
-        local url = base .. fileName .. '?v=' .. VERSION .. '&r=' .. tostring(math.random(1, 1e9))
-        local ok, source = pcall(game.HttpGet, game, url)
-        if ok and type(source) == 'string' and #source > 0 then
-            if marker and not source:find(marker, 1, true) then
-                lastErr = ('stale %s from %s (missing %s)'):format(fileName, base, marker)
-            else
-                local chunk, err = loadstring(source)
-                if chunk then
-                    local result = chunk()
-                    assert(result, ('%s did not return a library table'):format(fileName))
-                    return result
-                end
-                lastErr = tostring(err)
-            end
-        else
-            lastErr = tostring(source)
-        end
-    end
-
-    error(('Failed to load %s: %s'):format(fileName, tostring(lastErr)))
+    local result = chunk()
+    assert(result, ('%s did not return a library table'):format(path))
+    return result
 end
 
-local Library = loadLib('Library.lua', 'AccentRim')
-assert(Library.Version == '16.0.0', 'Wrong Library version - re-copy Example.lua from the repo')
-print('[UELinoria] loaded', Library.Version)
-
-local ThemeManager = loadLib('ThemeManager.lua')
-local SaveManager = loadLib('SaveManager.lua')
+local Library = loadLib('Library.lua')
+local ThemeManager = loadLib('addons/ThemeManager.lua')
+local SaveManager = loadLib('addons/SaveManager.lua')
 
 local Window = Library:CreateWindow({
     -- Set Center to true if you want the menu to appear in the center
