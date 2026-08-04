@@ -1,7 +1,7 @@
 -- Example menu for the rebuilt UE-styled LinoriaLib.
 
 -- Pin to a commit SHA in the *path* (many executors ignore ?query= cache busts on raw.githubusercontent.com).
-local COMMIT = 'dfce52f42a6a6a0c0f3722869ac1e23c2111b7dc'
+local COMMIT = 'db37bda71bf66f84f98caeff265a62171ea86945'
 local bases = {
     ('https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/%s/'):format(COMMIT),
     ('https://cdn.jsdelivr.net/gh/pandaeatdonuts-byte/UELinoriaLib@%s/'):format(COMMIT),
