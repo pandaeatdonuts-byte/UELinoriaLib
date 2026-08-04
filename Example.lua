@@ -34,7 +34,7 @@ local function loadLib(fileName, marker)
 end
 
 local Library = loadLib('Library.lua', 'WinPop')
-assert(Library.Version == '12.0.0', 'Wrong Library version — re-copy Example.lua from the repo')
+assert(Library.Version == '12.0.0', 'Wrong Library version - re-copy Example.lua from the repo')
 print('[UELinoria] loaded', Library.Version)
 
 local ThemeManager = loadLib('ThemeManager.lua')
