@@ -27,6 +27,9 @@ local Window = Library:CreateWindow({
     AutoShow = true,
     TabPadding = 8,
     MenuFadeTime = 0.2,
+    Resizable = true, -- drag the ◢ grip in the bottom-right corner
+    -- MinSize = Vector2.new(420, 320),
+    -- MaxSize = Vector2.new(1200, 900),
     -- Optional override for the top-right status text:
     -- Status = '[UP] Just a baseplate.',
 })

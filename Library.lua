@@ -437,7 +437,132 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag)
     end));
 end;
 
-function Library:AddToolTip(InfoStr, HoverInstance)
+function Library:MakeResizable(Instance, MinSize, MaxSize, GhostWhileResize)
+    MinSize = MinSize or Vector2.new(420, 320);
+    MaxSize = MaxSize or Vector2.new(1200, 900);
+
+    local Grip = Library:Create('TextButton', {
+        Name = 'ResizeGrip';
+        Text = '';
+        AutoButtonColor = false;
+        BackgroundTransparency = 1;
+        BorderSizePixel = 0;
+        Size = UDim2.fromOffset(18, 18);
+        Position = UDim2.new(1, -2, 1, -2);
+        AnchorPoint = Vector2.new(1, 1);
+        ZIndex = 50;
+        Parent = Instance;
+    });
+
+    local GripIcon = Library:CreateLabel({
+        BackgroundTransparency = 1;
+        Size = UDim2.fromOffset(16, 16);
+        Position = UDim2.new(1, 0, 1, 0);
+        AnchorPoint = Vector2.new(1, 1);
+        Text = '◢';
+        TextSize = 14;
+        TextColor3 = Library.OutlineColor;
+        TextXAlignment = Enum.TextXAlignment.Right;
+        TextYAlignment = Enum.TextYAlignment.Bottom;
+        ZIndex = 51;
+        Parent = Grip;
+    });
+
+    Library:AddToRegistry(GripIcon, {
+        TextColor3 = 'OutlineColor';
+    });
+
+    Library:OnHighlight(Grip, GripIcon,
+        { TextColor3 = 'AccentColor' },
+        { TextColor3 = 'OutlineColor' }
+    );
+
+    local Resizing = false;
+    local MoveConn = nil;
+    local StartMouse = Vector2.zero;
+    local StartSize = Vector2.zero;
+    local StartPos = Vector2.zero;
+
+    local function StopResize()
+        if not Resizing then
+            return;
+        end;
+
+        Resizing = false;
+
+        if MoveConn then
+            MoveConn:Disconnect();
+            MoveConn = nil;
+        end;
+
+        if GhostWhileResize then
+            Library:SetDragVisual(Instance, false);
+        end;
+    end;
+
+    Grip.InputBegan:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+            return;
+        end;
+
+        -- Lock size/position into offset space (same fix as dragging).
+        local AbsPos = Instance.AbsolutePosition;
+        local AbsSize = Instance.AbsoluteSize;
+        local Anchor = Instance.AnchorPoint;
+        local PosX = AbsPos.X + AbsSize.X * Anchor.X;
+        local PosY = AbsPos.Y + AbsSize.Y * Anchor.Y;
+
+        Instance.Position = UDim2.fromOffset(PosX, PosY);
+        Instance.Size = UDim2.fromOffset(AbsSize.X, AbsSize.Y);
+
+        StartMouse = Vector2.new(Mouse.X, Mouse.Y);
+        StartSize = Vector2.new(AbsSize.X, AbsSize.Y);
+        StartPos = Vector2.new(PosX, PosY);
+        Resizing = true;
+
+        if GhostWhileResize then
+            Library:SetDragVisual(Instance, true);
+        end;
+
+        if MoveConn then
+            MoveConn:Disconnect();
+        end;
+
+        MoveConn = RenderStepped:Connect(function(Dt)
+            if not Resizing then
+                return;
+            end;
+
+            local Delta = Vector2.new(Mouse.X - StartMouse.X, Mouse.Y - StartMouse.Y);
+            local TargetW = math.clamp(StartSize.X + Delta.X, MinSize.X, MaxSize.X);
+            local TargetH = math.clamp(StartSize.Y + Delta.Y, MinSize.Y, MaxSize.Y);
+
+            local CurrentW = Instance.Size.X.Offset;
+            local CurrentH = Instance.Size.Y.Offset;
+            local Alpha = 1 - math.exp(-(Library.Anim.DragSpeed or 22) * Dt);
+
+            local NewW = CurrentW + (TargetW - CurrentW) * Alpha;
+            local NewH = CurrentH + (TargetH - CurrentH) * Alpha;
+
+            Instance.Size = UDim2.fromOffset(NewW, NewH);
+
+            -- Keep the top-left corner stable while growing from the bottom-right grip.
+            local Anchor = Instance.AnchorPoint;
+            Instance.Position = UDim2.fromOffset(
+                StartPos.X + (NewW - StartSize.X) * Anchor.X,
+                StartPos.Y + (NewH - StartSize.Y) * Anchor.Y
+            );
+        end);
+    end);
+
+    Library:GiveSignal(InputService.InputEnded:Connect(function(Input)
+        if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            StopResize();
+        end;
+    end));
+
+    return Grip;
+end;
     local X, Y = Library:GetTextBounds(InfoStr, Library.Font, 14);
     local Tooltip = Library:Create('Frame', {
         BackgroundColor3 = Library.MainColor,
@@ -3283,6 +3408,12 @@ function Library:CreateWindow(...)
         BackgroundColor3 = 'MainColor';
     });
     Library:MakeDraggable(Outer, 25, true);
+
+    if Config.Resizable ~= false then
+        local MinSize = typeof(Config.MinSize) == 'Vector2' and Config.MinSize or Vector2.new(420, 320);
+        local MaxSize = typeof(Config.MaxSize) == 'Vector2' and Config.MaxSize or Vector2.new(1200, 900);
+        Library:MakeResizable(Outer, MinSize, MaxSize, true);
+    end;
 
     local Inner = Library:Create('Frame', {
         BackgroundTransparency = 1;
