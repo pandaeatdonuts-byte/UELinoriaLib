@@ -1,7 +1,7 @@
 -- Example menu for the rebuilt UE-styled LinoriaLib.
 -- IMPORTANT: re-paste THIS whole script into your executor (old pastes load a cached Library).
 
-local VERSION = '6'
+local VERSION = '7'
 local bases = {
     ('https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/main/v/%s/'):format(VERSION),
     ('https://cdn.jsdelivr.net/gh/pandaeatdonuts-byte/UELinoriaLib@main/v/%s/'):format(VERSION),
@@ -33,8 +33,8 @@ local function loadLib(fileName, marker)
     error(('Failed to load %s: %s'):format(fileName, tostring(lastErr)))
 end
 
-local Library = loadLib('Library.lua', 'ConnectShell')
-assert(Library.Version == '6.0.0', 'Wrong Library version — re-copy Example.lua from the repo')
+local Library = loadLib('Library.lua', 'SetMenuBlur')
+assert(Library.Version == '7.0.0', 'Wrong Library version — re-copy Example.lua from the repo')
 print('[UELinoria] loaded', Library.Version)
 
 local ThemeManager = loadLib('ThemeManager.lua')
