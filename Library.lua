@@ -1,3 +1,4 @@
+-- CACHE_BUST_VERSION=2
 local InputService = game:GetService('UserInputService');
 local TextService = game:GetService('TextService');
 local CoreGui = game:GetService('CoreGui');

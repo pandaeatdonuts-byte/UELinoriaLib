@@ -1,9 +1,10 @@
 -- Example menu for the rebuilt UE-styled LinoriaLib.
 
 local repo = 'https://raw.githubusercontent.com/pandaeatdonuts-byte/UELinoriaLib/main/'
+local bust = tostring(tick()) -- busts executor / CDN HttpGet caches
 
 local function loadLib(path)
-    local source = game:HttpGet(repo .. path)
+    local source = game:HttpGet(repo .. path .. '?t=' .. bust)
     local chunk, err = loadstring(source)
     assert(chunk, ('Failed to compile %s: %s'):format(path, tostring(err)))
 
