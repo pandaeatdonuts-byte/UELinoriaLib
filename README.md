@@ -20,3 +20,5 @@ See [`Example.lua`](Example.lua) for a full demo menu.
 
 - Original LinoriaLib: Inori, Wally, and contributors
 - UE visual direction: F3kel666 / c98j (Unnamed Enhancements)
+
+this was fully vibecoded by cursor and claude pls star repo pls pls pls
