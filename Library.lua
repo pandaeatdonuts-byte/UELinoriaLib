@@ -2798,7 +2798,7 @@ do
             Parent = Container;
         });
 
-        Library:ApplyRound(DropdownOuter, 9, 'OutlineColor');
+        local DropdownStroke = Library:ApplyRound(DropdownOuter, 9, 'OutlineColor');
 
         Library:AddToRegistry(DropdownOuter, {
             BackgroundColor3 = 'MainColor';
@@ -2855,11 +2855,13 @@ do
         local DROPDOWN_RADIUS = 9;
         local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + 2;
         local Scrolling;
+        local Seam;
 
         -- The list is parented to the ScreenGui, not the window, so under Global
         -- ZIndexBehavior it competes with every control it floats over (groupbox
         -- contents run 5-10). It has to sit above all of that, and the trigger has
-        -- to sit above the list so the rounded "join" still tucks underneath it.
+        -- to sit above the list, because while open the panel spans the trigger
+        -- and supplies the fill and outline for both.
         local LIST_Z = 24;
         local TRIGGER_Z_OPEN = 28;
         local TriggerZ = {
@@ -2872,6 +2874,15 @@ do
         local function SetTriggerRaised(Raised)
             for Inst, Base in next, TriggerZ do
                 Inst.ZIndex = Raised and (TRIGGER_Z_OPEN + (Base - 5)) or Base;
+            end;
+
+            -- While open the list panel is drawn behind the trigger and spans it,
+            -- so the trigger drops its own fill and outline. Its label and arrow
+            -- keep drawing on top and the two read as a single rounded shape.
+            DropdownOuter.BackgroundTransparency = Raised and 1 or 0;
+
+            if DropdownStroke then
+                DropdownStroke.Transparency = Raised and 1 or 0;
             end;
         end;
 
@@ -2892,21 +2903,21 @@ do
         -- true when the list had to open upwards because it would not fit below.
         local Flipped = false;
 
-        local function RecalculateListPosition()
-            local Join = ListOuter.Visible and DROPDOWN_RADIUS or 0;
+        local function TriggerHeight()
+            local H = math.floor(DropdownOuter.AbsoluteSize.Y + 0.5);
 
+            return H > 0 and H or DropdownOuter.Size.Y.Offset;
+        end;
+
+        local function RecalculateListPosition()
             local X = math.floor(DropdownOuter.AbsolutePosition.X + 0.5);
             local Top = math.floor(DropdownOuter.AbsolutePosition.Y + 0.5);
-            local Bottom = Top + math.floor(DropdownOuter.AbsoluteSize.Y + 0.5);
 
             local Viewport = ScreenGui.AbsoluteSize;
-            local Y;
 
-            if Flipped then
-                Y = Top - DropdownListHeight;
-            else
-                Y = Bottom - Join;
-            end;
+            -- The panel wraps the trigger rather than sitting under it, so its top
+            -- edge is the trigger's top edge (or the list's, when flipped up).
+            local Y = Flipped and (Top - DropdownListHeight) or Top;
 
             -- Keep the panel on screen horizontally as well; a groupbox near the
             -- right edge would otherwise push it off. Width comes from the trigger
@@ -2944,18 +2955,24 @@ do
                 DropdownListHeight = YSize;
             end;
 
-            local Join = ListOuter.Visible and DROPDOWN_RADIUS or 0;
+            local Head = TriggerHeight();
 
+            -- One rounded shell around trigger + items, so there is a single
+            -- outline and no seam between two stacked boxes.
             ListOuter.Size = UDim2.fromOffset(
                 math.floor(DropdownOuter.AbsoluteSize.X + 0.5),
-                DropdownListHeight + Join
+                DropdownListHeight + Head
             );
 
             if Scrolling then
-                -- The join is the slice that hides under the trigger: it is on the
-                -- top edge when opening down, on the bottom edge when flipped up.
-                Scrolling.Position = UDim2.new(0, 0, 0, Flipped and 0 or Join);
-                Scrolling.Size = UDim2.new(1, 0, 1, -Join);
+                -- The trigger occupies the top slot, or the bottom one when the
+                -- list had to open upwards.
+                Scrolling.Position = UDim2.new(0, 0, 0, Flipped and 0 or Head);
+                Scrolling.Size = UDim2.new(1, 0, 1, -Head);
+            end;
+
+            if Seam then
+                Seam.Position = UDim2.new(0, 4, 0, (Flipped and DropdownListHeight or Head) - 2);
             end;
 
             RecalculateListPosition();
@@ -3004,6 +3021,23 @@ do
         Library:AddToRegistry(Scrolling, {
             ScrollBarImageColor3 = 'AccentColor'
         })
+
+        -- Trigger and items now share one shell, so mark where one ends and the
+        -- other begins with the same pill divider the groupboxes use.
+        Seam = Library:Create('Frame', {
+            BackgroundColor3 = Library.OutlineColor;
+            BorderSizePixel = 0;
+            Position = UDim2.new(0, 4, 0, 18);
+            Size = UDim2.new(1, -8, 0, 2);
+            ZIndex = LIST_Z + 3;
+            Parent = ListInner;
+        });
+
+        Library:AddCorner(Seam, 1);
+
+        Library:AddToRegistry(Seam, {
+            BackgroundColor3 = 'OutlineColor';
+        });
 
         Library:Create('UIListLayout', {
             Padding = UDim.new(0, 0);
