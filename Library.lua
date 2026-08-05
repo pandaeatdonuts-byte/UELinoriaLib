@@ -2823,25 +2823,9 @@ do
         end
 
         local MAX_DROPDOWN_ITEMS = 8;
-        local DROPDOWN_CONNECT = 8;
+        local DROPDOWN_RADIUS = 9;
         local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + 2;
         local Scrolling;
-
-        local ConnectCap = Library:Create('Frame', {
-            Name = 'ConnectCap';
-            BackgroundColor3 = Library.MainColor;
-            BorderSizePixel = 0;
-            AnchorPoint = Vector2.new(0, 1);
-            Position = UDim2.new(0, 0, 1, 0);
-            Size = UDim2.new(1, 0, 0, DROPDOWN_CONNECT);
-            Visible = false;
-            ZIndex = 9;
-            Parent = DropdownOuter;
-        });
-
-        Library:AddToRegistry(ConnectCap, {
-            BackgroundColor3 = 'MainColor';
-        });
 
         local ListOuter = Library:Create('Frame', {
             BackgroundColor3 = Library.MainColor;
@@ -2852,37 +2836,41 @@ do
             Parent = ScreenGui;
         });
 
-        Library:ApplyRound(ListOuter, 9, 'OutlineColor');
+        Library:ApplyRound(ListOuter, DROPDOWN_RADIUS, 'OutlineColor');
         Library:AddToRegistry(ListOuter, {
             BackgroundColor3 = 'MainColor';
         });
 
-        local function RecalculateListPosition()
-            local Overlap = ListOuter.Visible and DROPDOWN_CONNECT or 0;
+        local ListFlat = Library:Create('Frame', {
+            Name = 'ListFlat';
+            BackgroundColor3 = Library.MainColor;
+            BorderSizePixel = 0;
+            Size = UDim2.new(1, 0, 0, DROPDOWN_RADIUS);
+            Visible = false;
+            ZIndex = 22;
+            Parent = ListOuter;
+        });
 
+        Library:AddToRegistry(ListFlat, {
+            BackgroundColor3 = 'MainColor';
+        });
+
+        local function RecalculateListPosition()
             ListOuter.Position = UDim2.fromOffset(
                 math.floor(DropdownOuter.AbsolutePosition.X + 0.5),
-                math.floor(DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y - Overlap + 0.5)
+                math.floor(DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y - 1 + 0.5)
             );
         end;
 
-        local function RecalculateListSize(YSize, ForceOpen)
+        local function RecalculateListSize(YSize)
             if YSize then
                 DropdownListHeight = YSize;
             end;
 
-            local ContentH = DropdownListHeight;
-            local Overlap = (ForceOpen or ListOuter.Visible) and DROPDOWN_CONNECT or 0;
-
             ListOuter.Size = UDim2.fromOffset(
                 math.floor(DropdownOuter.AbsoluteSize.X + 0.5),
-                ContentH + Overlap
+                DropdownListHeight
             );
-
-            if Scrolling then
-                Scrolling.Position = UDim2.new(0, 0, 0, Overlap);
-                Scrolling.Size = UDim2.new(1, 0, 1, -Overlap);
-            end;
 
             RecalculateListPosition();
         end;
@@ -2895,7 +2883,8 @@ do
         local ListInner = Library:Create('Frame', {
             BackgroundTransparency = 1;
             BorderSizePixel = 0;
-            Size = UDim2.new(1, 0, 1, 0);
+            Position = UDim2.new(0, 0, 0, DROPDOWN_RADIUS);
+            Size = UDim2.new(1, 0, 1, -DROPDOWN_RADIUS);
             ZIndex = 21;
             Parent = ListOuter;
         });
@@ -3114,19 +3103,18 @@ do
         end;
 
         function Dropdown:OpenDropdown()
-            ConnectCap.Visible = true;
+            ListFlat.Visible = true;
+            RecalculateListSize();
             ListOuter.Visible = true;
-            RecalculateListSize(nil, true);
             Library.OpenedFrames[ListOuter] = true;
             DropdownArrow.Rotation = 180;
         end;
 
         function Dropdown:CloseDropdown()
-            ConnectCap.Visible = false;
+            ListFlat.Visible = false;
             ListOuter.Visible = false;
             Library.OpenedFrames[ListOuter] = nil;
             DropdownArrow.Rotation = 0;
-            RecalculateListSize(nil, false);
         end;
 
         function Dropdown:OnChanged(Func)
