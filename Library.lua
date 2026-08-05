@@ -40,6 +40,7 @@ local Library = {
     Font = Enum.Font.Code,
 
     OpenedFrames = {};
+    OpenedDropdowns = {};
     DependencyBoxes = {};
 
     Signals = {};
@@ -692,6 +693,16 @@ function Library:GetMouse()
     return Vector2.new(Mouse.X, Mouse.Y);
 end;
 
+-- Dropdown lists live on the ScreenGui rather than inside the window, so nothing
+-- closes them implicitly. Anything that hides or replaces the window has to.
+function Library:CloseAllDropdowns(Except)
+    for Dropdown in next, Library.OpenedDropdowns do
+        if Dropdown ~= Except then
+            Dropdown:CloseDropdown();
+        end;
+    end;
+end;
+
 function Library:MouseIsOverOpenedFrame()
     local MousePos = Library:GetMouse();
 
@@ -807,6 +818,10 @@ end
 
 function Library:Unload()
     Library.MenuOpen = false;
+
+    Library:CloseAllDropdowns();
+    table.clear(Library.OpenedDropdowns);
+    table.clear(Library.OpenedFrames);
 
     if Library.DragBlur then
         pcall(function()
@@ -2841,11 +2856,30 @@ do
         local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + 2;
         local Scrolling;
 
+        -- The list is parented to the ScreenGui, not the window, so under Global
+        -- ZIndexBehavior it competes with every control it floats over (groupbox
+        -- contents run 5-10). It has to sit above all of that, and the trigger has
+        -- to sit above the list so the rounded "join" still tucks underneath it.
+        local LIST_Z = 24;
+        local TRIGGER_Z_OPEN = 28;
+        local TriggerZ = {
+            [DropdownOuter] = DropdownOuter.ZIndex;
+            [DropdownInner] = DropdownInner.ZIndex;
+            [ItemList] = ItemList.ZIndex;
+            [DropdownArrow] = DropdownArrow.ZIndex;
+        };
+
+        local function SetTriggerRaised(Raised)
+            for Inst, Base in next, TriggerZ do
+                Inst.ZIndex = Raised and (TRIGGER_Z_OPEN + (Base - 5)) or Base;
+            end;
+        end;
+
         local ListOuter = Library:Create('Frame', {
             BackgroundColor3 = Library.MainColor;
             BorderSizePixel = 0;
             ClipsDescendants = true;
-            ZIndex = 4;
+            ZIndex = LIST_Z;
             Visible = false;
             Parent = ScreenGui;
         });
@@ -2855,13 +2889,54 @@ do
             BackgroundColor3 = 'MainColor';
         });
 
+        -- true when the list had to open upwards because it would not fit below.
+        local Flipped = false;
+
         local function RecalculateListPosition()
             local Join = ListOuter.Visible and DROPDOWN_RADIUS or 0;
 
-            ListOuter.Position = UDim2.fromOffset(
-                math.floor(DropdownOuter.AbsolutePosition.X + 0.5),
-                math.floor(DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y - Join + 0.5)
-            );
+            local X = math.floor(DropdownOuter.AbsolutePosition.X + 0.5);
+            local Top = math.floor(DropdownOuter.AbsolutePosition.Y + 0.5);
+            local Bottom = Top + math.floor(DropdownOuter.AbsoluteSize.Y + 0.5);
+
+            local Viewport = ScreenGui.AbsoluteSize;
+            local Y;
+
+            if Flipped then
+                Y = Top - DropdownListHeight;
+            else
+                Y = Bottom - Join;
+            end;
+
+            -- Keep the panel on screen horizontally as well; a groupbox near the
+            -- right edge would otherwise push it off. Width comes from the trigger
+            -- rather than ListOuter.AbsoluteSize, which lags a layout pass behind
+            -- when this runs straight after a resize.
+            local Width = math.floor(DropdownOuter.AbsoluteSize.X + 0.5);
+
+            if Viewport.X > 0 then
+                X = math.clamp(X, 0, math.max(0, Viewport.X - Width));
+            end;
+
+            ListOuter.Position = UDim2.fromOffset(X, Y);
+        end;
+
+        -- Decide whether there is room below the trigger before positioning.
+        local function RecalculateListDirection()
+            local Viewport = ScreenGui.AbsoluteSize;
+
+            if Viewport.Y <= 0 then
+                Flipped = false;
+                return;
+            end;
+
+            local Top = DropdownOuter.AbsolutePosition.Y;
+            local Bottom = Top + DropdownOuter.AbsoluteSize.Y;
+
+            local FitsBelow = (Bottom + DropdownListHeight) <= Viewport.Y;
+            local FitsAbove = (Top - DropdownListHeight) >= 0;
+
+            Flipped = (not FitsBelow) and FitsAbove;
         end;
 
         local function RecalculateListSize(YSize)
@@ -2877,7 +2952,9 @@ do
             );
 
             if Scrolling then
-                Scrolling.Position = UDim2.new(0, 0, 0, Join);
+                -- The join is the slice that hides under the trigger: it is on the
+                -- top edge when opening down, on the bottom edge when flipped up.
+                Scrolling.Position = UDim2.new(0, 0, 0, Flipped and 0 or Join);
                 Scrolling.Size = UDim2.new(1, 0, 1, -Join);
             end;
 
@@ -2889,11 +2966,23 @@ do
             RecalculateListSize();
         end);
 
+        -- Groupbox columns scroll. The list is not a descendant of that column, so
+        -- it is never clipped and would trail the trigger right out of the window.
+        local ScrollHost = DropdownOuter:FindFirstAncestorWhichIsA('ScrollingFrame');
+
+        if ScrollHost then
+            ScrollHost:GetPropertyChangedSignal('CanvasPosition'):Connect(function()
+                if ListOuter.Visible then
+                    Dropdown:CloseDropdown();
+                end;
+            end);
+        end;
+
         local ListInner = Library:Create('Frame', {
             BackgroundTransparency = 1;
             BorderSizePixel = 0;
             Size = UDim2.new(1, 0, 1, 0);
-            ZIndex = 4;
+            ZIndex = LIST_Z;
             Parent = ListOuter;
         });
 
@@ -2902,7 +2991,7 @@ do
             BorderSizePixel = 0;
             CanvasSize = UDim2.new(0, 0, 0, 0);
             Size = UDim2.new(1, 0, 1, 0);
-            ZIndex = 4;
+            ZIndex = LIST_Z;
             Parent = ListInner;
 
             TopImage = 'rbxasset://textures/ui/Scroll/scroll-middle.png',
@@ -2987,7 +3076,7 @@ do
                     BackgroundColor3 = Library.MainColor;
                     BorderSizePixel = 0;
                     Size = UDim2.new(1, 0, 0, 20);
-                    ZIndex = 5;
+                    ZIndex = LIST_Z + 1;
                     Text = '';
                     AutoButtonColor = false;
                     Parent = Scrolling;
@@ -3004,7 +3093,7 @@ do
                     TextSize = 14;
                     Text = Value;
                     TextXAlignment = Enum.TextXAlignment.Left;
-                    ZIndex = 6;
+                    ZIndex = LIST_Z + 2;
                     Parent = Button;
                 });
 
@@ -3081,6 +3170,14 @@ do
             Scrolling.CanvasSize = UDim2.fromOffset(0, (Count * 20) + 1);
 
             local Y = math.clamp(Count * 20, 0, MAX_DROPDOWN_ITEMS * 20) + 1;
+
+            -- The height just changed, so whether it still fits below may have too.
+            DropdownListHeight = Y;
+
+            if ListOuter.Visible then
+                RecalculateListDirection();
+            end;
+
             RecalculateListSize(Y);
         end;
 
@@ -3093,15 +3190,26 @@ do
         end;
 
         function Dropdown:OpenDropdown()
+            -- Two lists open at once would overlap each other on the popup layer.
+            Library:CloseAllDropdowns(Dropdown);
+
             ListOuter.Visible = true;
+            RecalculateListDirection();
+            SetTriggerRaised(true);
             RecalculateListSize();
+
             Library.OpenedFrames[ListOuter] = true;
+            Library.OpenedDropdowns[Dropdown] = true;
             DropdownArrow.Rotation = 180;
         end;
 
         function Dropdown:CloseDropdown()
             ListOuter.Visible = false;
+            Flipped = false;
+            SetTriggerRaised(false);
+
             Library.OpenedFrames[ListOuter] = nil;
+            Library.OpenedDropdowns[Dropdown] = nil;
             DropdownArrow.Rotation = 0;
             RecalculateListSize();
         end;
@@ -3137,12 +3245,17 @@ do
         end;
 
         DropdownOuter.InputBegan:Connect(function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 and not Library:MouseIsOverOpenedFrame() then
-                if ListOuter.Visible then
-                    Dropdown:CloseDropdown();
-                else
-                    Dropdown:OpenDropdown();
-                end;
+            if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                return;
+            end;
+
+            if ListOuter.Visible then
+                -- Our own list is registered as an opened frame and overlaps the
+                -- trigger's bottom edge, so MouseIsOverOpenedFrame would blank out
+                -- that band. A click that reaches the trigger always toggles.
+                Dropdown:CloseDropdown();
+            elseif not Library:MouseIsOverOpenedFrame() then
+                Dropdown:OpenDropdown();
             end;
         end);
 
@@ -3151,10 +3264,19 @@ do
                 return;
             end;
 
-            local AbsPos, AbsSize = ListOuter.AbsolutePosition, ListOuter.AbsoluteSize;
+            local MousePos = Library:GetMouse();
 
-            if Mouse.X < AbsPos.X or Mouse.X > AbsPos.X + AbsSize.X
-                or Mouse.Y < (AbsPos.Y - 20 - 1) or Mouse.Y > AbsPos.Y + AbsSize.Y then
+            local function Inside(Inst)
+                local AbsPos, AbsSize = Inst.AbsolutePosition, Inst.AbsoluteSize;
+
+                return MousePos.X >= AbsPos.X and MousePos.X <= AbsPos.X + AbsSize.X
+                    and MousePos.Y >= AbsPos.Y and MousePos.Y <= AbsPos.Y + AbsSize.Y;
+            end;
+
+            -- The trigger toggles itself; only close when the click misses both it
+            -- and the list. Testing the two rects directly keeps this correct when
+            -- the list opens upwards.
+            if not (Inside(ListOuter) or Inside(DropdownOuter)) then
                 Dropdown:CloseDropdown();
             end;
         end));
@@ -3889,6 +4011,9 @@ function Library:CreateWindow(...)
         Tab.TabButtonLabel = TabButtonLabel;
 
         function Tab:ShowTab()
+            -- A list left open on the outgoing tab would float over the new one.
+            Library:CloseAllDropdowns();
+
             for _, OtherTab in next, Window.Tabs do
                 OtherTab:HideTab();
             end;
@@ -4152,6 +4277,8 @@ function Library:CreateWindow(...)
                 });
 
                 function Tab:Show()
+                    Library:CloseAllDropdowns();
+
                     for _, OtherTab in next, Tabbox.Tabs do
                         OtherTab:Hide();
                     end;
@@ -4306,6 +4433,11 @@ function Library:CreateWindow(...)
         local FadeTime = Config.MenuFadeTime;
         Fading = true;
         Toggled = (not Toggled);
+
+        -- Dropdown lists are siblings of the window, so the fade below never
+        -- reaches them; without this they hang on screen after the menu closes.
+        Library:CloseAllDropdowns();
+
         ModalElement.Modal = Toggled;
         Library.MenuOpen = Toggled;
 
