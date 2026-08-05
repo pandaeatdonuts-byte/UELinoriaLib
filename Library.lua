@@ -260,6 +260,10 @@ function Library:AddAccentBar(Parent, Radius, ZIndex)
         Parent = Parent;
     });
 
+    pcall(function()
+        Rim.Interactable = false;
+    end);
+
     Library:AddCorner(Rim, Radius);
 
     Library:AddToRegistry(Rim, {
@@ -276,6 +280,10 @@ function Library:AddAccentBar(Parent, Radius, ZIndex)
         ZIndex = ZIndex;
         Parent = Rim;
     });
+
+    pcall(function()
+        Cover.Interactable = false;
+    end);
 
     Library:AddCorner(Cover, Radius);
 
@@ -404,40 +412,67 @@ function Library:SetMenuBlur(Enabled)
     end;
 end;
 
--- Slight transparency while dragging (CanvasGroup) / no coordinate jump.
+-- Slight transparency while dragging.
 function Library:SetDragVisual(Instance, Enabled)
-    local Ghost = 0.32;
+    local Ghost = 0.28;
 
     if Instance:IsA('CanvasGroup') then
         Library:Tween(Instance, {
             GroupTransparency = Enabled and Ghost or 0;
         }, 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
     else
-        -- Frame windows: only tint the shell slightly so children stay readable.
         Library:Tween(Instance, {
             BackgroundTransparency = Enabled and (Ghost * 0.45) or 0;
         }, 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
     end;
 end;
 
--- Instant drag using screen-space mouse (matches AbsolutePosition with IgnoreGuiInset).
+-- Drag using a hit target (title bar / full frame). Uses UIS so child labels cannot eat the drag.
 function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
     local Hit = Handle or Instance;
     Hit.Active = true;
     Instance.Active = true;
+
+    local Dragging = false;
+    local Grab = Vector2.zero;
+    local MoveConn;
+    local EndConn;
+
+    local function StopDrag()
+        if not Dragging then
+            return;
+        end;
+
+        Dragging = false;
+
+        if MoveConn then
+            MoveConn:Disconnect();
+            MoveConn = nil;
+        end;
+
+        if EndConn then
+            EndConn:Disconnect();
+            EndConn = nil;
+        end;
+
+        if GhostWhileDrag then
+            Library:SetDragVisual(Instance, false);
+        end;
+    end;
 
     Hit.InputBegan:Connect(function(Input)
         if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then
             return;
         end;
 
-        local MousePos = InputService:GetMouseLocation();
-        local Rel = Vector2.new(
-            MousePos.X - Instance.AbsolutePosition.X,
-            MousePos.Y - Instance.AbsolutePosition.Y
-        );
+        if not Instance.Visible or not Instance.Parent then
+            return;
+        end;
 
-        if Rel.Y > (Cutoff or 40) then
+        local MousePos = InputService:GetMouseLocation();
+        local RelY = MousePos.Y - Instance.AbsolutePosition.Y;
+
+        if Cutoff and RelY > Cutoff then
             return;
         end;
 
@@ -449,24 +484,33 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
             AbsPos.Y + AbsSize.Y * Anchor.Y
         );
 
-        local Grab = Vector2.new(
+        Grab = Vector2.new(
             MousePos.X - Instance.Position.X.Offset,
             MousePos.Y - Instance.Position.Y.Offset
         );
+
+        Dragging = true;
 
         if GhostWhileDrag then
             Library:SetDragVisual(Instance, true);
         end;
 
-        while InputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
-            local Pos = InputService:GetMouseLocation();
-            Instance.Position = UDim2.fromOffset(Pos.X - Grab.X, Pos.Y - Grab.Y);
-            RenderStepped:Wait();
-        end;
+        MoveConn = InputService.InputChanged:Connect(function(Change)
+            if not Dragging then
+                return;
+            end;
 
-        if GhostWhileDrag then
-            Library:SetDragVisual(Instance, false);
-        end;
+            if Change.UserInputType == Enum.UserInputType.MouseMovement then
+                local Pos = InputService:GetMouseLocation();
+                Instance.Position = UDim2.fromOffset(Pos.X - Grab.X, Pos.Y - Grab.Y);
+            end;
+        end);
+
+        EndConn = InputService.InputEnded:Connect(function(Ended)
+            if Ended.UserInputType == Enum.UserInputType.MouseButton1 then
+                StopDrag();
+            end;
+        end);
     end);
 end;
 
@@ -3337,7 +3381,20 @@ do
 
     Library.Watermark = WatermarkOuter;
     Library.WatermarkText = WatermarkLabel;
-    Library:MakeDraggable(Library.Watermark);
+
+    local WatermarkDrag = Library:Create('TextButton', {
+        Name = 'DragHit';
+        Text = '';
+        AutoButtonColor = false;
+        BackgroundTransparency = 1;
+        BorderSizePixel = 0;
+        Size = UDim2.fromScale(1, 1);
+        ZIndex = 204;
+        Parent = WatermarkOuter;
+    });
+
+    WatermarkLabel.ZIndex = 203;
+    Library:MakeDraggable(Library.Watermark, nil, false, WatermarkDrag);
 
 
 
@@ -3393,7 +3450,19 @@ do
 
     Library.KeybindFrame = KeybindOuter;
     Library.KeybindContainer = KeybindContainer;
-    Library:MakeDraggable(KeybindOuter);
+
+    local KeybindDrag = Library:Create('TextButton', {
+        Name = 'DragHit';
+        Text = '';
+        AutoButtonColor = false;
+        BackgroundTransparency = 1;
+        BorderSizePixel = 0;
+        Size = UDim2.new(1, 0, 0, 20);
+        ZIndex = 120;
+        Parent = KeybindOuter;
+    });
+
+    Library:MakeDraggable(KeybindOuter, nil, false, KeybindDrag);
 end;
 
 function Library:SetWatermarkVisibility(Bool)
@@ -3527,11 +3596,11 @@ function Library:CreateWindow(...)
         Tabs = {};
     };
 
-    local Outer = Library:Create('Frame', {
+    local Outer = Library:Create('CanvasGroup', {
         AnchorPoint = Config.AnchorPoint,
         BackgroundColor3 = Library.MainColor;
         BorderSizePixel = 0;
-        ClipsDescendants = true;
+        GroupTransparency = 0;
         Position = Config.Position,
         Size = Config.Size,
         Visible = false;
@@ -3553,8 +3622,18 @@ function Library:CreateWindow(...)
         Parent = Outer;
     });
 
-    -- Drag from the title strip (children otherwise eat Outer.InputBegan).
-    Library:MakeDraggable(Outer, 25, true, Inner);
+    local TitleDrag = Library:Create('TextButton', {
+        Name = 'TitleDrag';
+        Text = '';
+        AutoButtonColor = false;
+        BackgroundTransparency = 1;
+        BorderSizePixel = 0;
+        Size = UDim2.new(1, 0, 0, 25);
+        ZIndex = 50;
+        Parent = Inner;
+    });
+
+    Library:MakeDraggable(Outer, nil, true, TitleDrag);
 
     if Config.Resizable ~= false then
         local MinSize = typeof(Config.MinSize) == 'Vector2' and Config.MinSize or Vector2.new(420, 320);
@@ -3568,7 +3647,7 @@ function Library:CreateWindow(...)
         Text = Config.Title or '';
         TextXAlignment = Enum.TextXAlignment.Left;
         TextTruncate = Enum.TextTruncate.AtEnd;
-        ZIndex = 1;
+        ZIndex = 41;
         Parent = Inner;
     });
 
@@ -3580,7 +3659,7 @@ function Library:CreateWindow(...)
         TextColor3 = Library.AccentColor;
         TextXAlignment = Enum.TextXAlignment.Right;
         TextTruncate = Enum.TextTruncate.AtEnd;
-        ZIndex = 2;
+        ZIndex = 41;
         Parent = Inner;
     });
 
@@ -4227,7 +4306,6 @@ function Library:CreateWindow(...)
         Parent = ScreenGui;
     });
 
-    local TransparencyCache = {};
     local Toggled = false;
     local Fading = false;
 
@@ -4243,50 +4321,23 @@ function Library:CreateWindow(...)
         Library.MenuOpen = Toggled;
 
         if Toggled then
-            -- Show immediately so the transparency fade is visible.
             Outer.Visible = true;
+            Outer.GroupTransparency = 1;
             Library:SetMenuBlur(true);
         else
             Library:SetMenuBlur(false);
         end;
 
-        local function FadeProp(Inst, Prop, Goal)
-            local Cache = TransparencyCache[Inst];
-            if not Cache then
-                Cache = {};
-                TransparencyCache[Inst] = Cache;
-            end;
+        -- CanvasGroup fades the whole window evenly (avoids accent-rim blue flashes).
+        local FadeTween = Library:Tween(Outer, {
+            GroupTransparency = Toggled and 0 or 1;
+        }, FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
 
-            if Cache[Prop] == nil then
-                Cache[Prop] = Inst[Prop];
-            end;
-
-            if Cache[Prop] == 1 then
-                return;
-            end;
-
-            TweenService:Create(Inst, TweenInfo.new(FadeTime, Enum.EasingStyle.Linear), {
-                [Prop] = Toggled and Cache[Prop] or 1;
-            }):Play();
+        if FadeTween then
+            FadeTween.Completed:Wait();
+        else
+            task.wait(FadeTime);
         end;
-
-        FadeProp(Outer, 'BackgroundTransparency');
-
-        for _, Desc in next, Outer:GetDescendants() do
-            if Desc:IsA('ImageLabel') then
-                FadeProp(Desc, 'ImageTransparency');
-                FadeProp(Desc, 'BackgroundTransparency');
-            elseif Desc:IsA('TextLabel') or Desc:IsA('TextBox') or Desc:IsA('TextButton') then
-                FadeProp(Desc, 'TextTransparency');
-                FadeProp(Desc, 'BackgroundTransparency');
-            elseif Desc:IsA('Frame') or Desc:IsA('ScrollingFrame') or Desc:IsA('CanvasGroup') then
-                FadeProp(Desc, 'BackgroundTransparency');
-            elseif Desc:IsA('UIStroke') then
-                FadeProp(Desc, 'Transparency');
-            end;
-        end;
-
-        task.wait(FadeTime);
 
         Outer.Visible = Toggled;
         Fading = false;
