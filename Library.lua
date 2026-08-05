@@ -2835,10 +2835,30 @@ do
         end
 
         local MAX_DROPDOWN_ITEMS = 8;
+        local DROPDOWN_CONNECT = 8;
+        local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + 2;
+        local Scrolling;
+
+        local ConnectCap = Library:Create('Frame', {
+            Name = 'ConnectCap';
+            BackgroundColor3 = Library.MainColor;
+            BorderSizePixel = 0;
+            AnchorPoint = Vector2.new(0, 1);
+            Position = UDim2.new(0, 0, 1, 0);
+            Size = UDim2.new(1, 0, 0, DROPDOWN_CONNECT);
+            Visible = false;
+            ZIndex = 9;
+            Parent = DropdownOuter;
+        });
+
+        Library:AddToRegistry(ConnectCap, {
+            BackgroundColor3 = 'MainColor';
+        });
 
         local ListOuter = Library:Create('Frame', {
             BackgroundColor3 = Library.MainColor;
             BorderSizePixel = 0;
+            ClipsDescendants = true;
             ZIndex = 20;
             Visible = false;
             Parent = ScreenGui;
@@ -2850,23 +2870,38 @@ do
         });
 
         local function RecalculateListPosition()
+            local Overlap = ListOuter.Visible and DROPDOWN_CONNECT or 0;
+
             ListOuter.Position = UDim2.fromOffset(
-                DropdownOuter.AbsolutePosition.X,
-                DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y + 1
+                math.floor(DropdownOuter.AbsolutePosition.X + 0.5),
+                math.floor(DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y - Overlap + 0.5)
             );
         end;
 
-        local function RecalculateListSize(YSize)
-            ListOuter.Size = UDim2.fromOffset(DropdownOuter.AbsoluteSize.X, YSize or (MAX_DROPDOWN_ITEMS * 20 + 2));
+        local function RecalculateListSize(YSize, ForceOpen)
+            if YSize then
+                DropdownListHeight = YSize;
+            end;
+
+            local ContentH = DropdownListHeight;
+            local Overlap = (ForceOpen or ListOuter.Visible) and DROPDOWN_CONNECT or 0;
+
+            ListOuter.Size = UDim2.fromOffset(
+                math.floor(DropdownOuter.AbsoluteSize.X + 0.5),
+                ContentH + Overlap
+            );
+
+            if Scrolling then
+                Scrolling.Position = UDim2.new(0, 0, 0, Overlap);
+                Scrolling.Size = UDim2.new(1, 0, 1, -Overlap);
+            end;
+
             RecalculateListPosition();
         end;
 
-        RecalculateListPosition();
-        RecalculateListSize();
-
         DropdownOuter:GetPropertyChangedSignal('AbsolutePosition'):Connect(RecalculateListPosition);
         DropdownOuter:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
-            RecalculateListSize(ListOuter.Size.Y.Offset);
+            RecalculateListSize();
         end);
 
         local ListInner = Library:Create('Frame', {
@@ -2877,10 +2912,11 @@ do
             Parent = ListOuter;
         });
 
-        local Scrolling = Library:Create('ScrollingFrame', {
+        Scrolling = Library:Create('ScrollingFrame', {
             BackgroundTransparency = 1;
             BorderSizePixel = 0;
             CanvasSize = UDim2.new(0, 0, 0, 0);
+            Position = UDim2.new(0, 0, 0, 0);
             Size = UDim2.new(1, 0, 1, 0);
             ZIndex = 21;
             Parent = ListInner;
@@ -2902,6 +2938,8 @@ do
             SortOrder = Enum.SortOrder.LayoutOrder;
             Parent = Scrolling;
         });
+
+        RecalculateListSize();
 
         function Dropdown:Display()
             local Values = Dropdown.Values;
@@ -3088,16 +3126,19 @@ do
         end;
 
         function Dropdown:OpenDropdown()
-            RecalculateListPosition();
+            ConnectCap.Visible = true;
             ListOuter.Visible = true;
+            RecalculateListSize(nil, true);
             Library.OpenedFrames[ListOuter] = true;
             DropdownArrow.Rotation = 180;
         end;
 
         function Dropdown:CloseDropdown()
+            ConnectCap.Visible = false;
             ListOuter.Visible = false;
             Library.OpenedFrames[ListOuter] = nil;
             DropdownArrow.Rotation = 0;
+            RecalculateListSize(nil, false);
         end;
 
         function Dropdown:OnChanged(Func)
