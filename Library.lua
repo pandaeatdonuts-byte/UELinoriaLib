@@ -8,7 +8,6 @@ local RunService = game:GetService('RunService')
 local TweenService = game:GetService('TweenService');
 local RenderStepped = RunService.RenderStepped;
 local LocalPlayer = Players.LocalPlayer;
-local Mouse = LocalPlayer:GetMouse();
 
 local ProtectGui = protectgui or (syn and syn.protect_gui) or (function() end);
 
@@ -927,8 +926,8 @@ do
             Position = UDim2.fromOffset(DisplayFrame.AbsolutePosition.X, DisplayFrame.AbsolutePosition.Y + 18),
             Size = UDim2.fromOffset(230, Info.Transparency and 271 or 253);
             Visible = false;
-            ZIndex = 15;
-            Parent = ScreenGui,
+            ZIndex = 1005;
+            Parent = Library.PopupLayer,
         });
 
         Library:ApplyRound(PickerFrameOuter, 7, 'OutlineColor');
@@ -2975,7 +2974,7 @@ do
                         BorderSizePixel = 0;
                         Position = UDim2.new(0, 8, 0, 0);
                         Size = UDim2.new(1, -16, 0, 1);
-                        ZIndex = 24;
+                        ZIndex = 1003;
                         Parent = Button;
                     });
 
@@ -3082,6 +3081,7 @@ do
         end;
 
         function Dropdown:OpenDropdown()
+            RecalculateListPosition();
             RecalculateListSize(DropdownListHeight);
             ListOuter.Visible = true;
             Library.OpenedFrames[ListOuter] = true;
