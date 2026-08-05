@@ -57,6 +57,7 @@ local Library = {
         ColorPicker = 0.2;
         Hover = 0.14;
         Depbox = 0.22;
+        Notify = 0.34;
         Pop = 0.32;
         DragBlurSize = 10;
         MenuBlurSize = 10;
@@ -3778,16 +3779,18 @@ end;
 
 -- < Create other UI elements >
 do
+    -- Held off the screen edge so the panels' shadows and rounded corners have
+    -- somewhere to sit.
     Library.NotificationArea = Library:Create('Frame', {
         BackgroundTransparency = 1;
-        Position = UDim2.new(0, 0, 0, 40);
-        Size = UDim2.new(0, 300, 0, 200);
+        Position = UDim2.new(0, 12, 0, 44);
+        Size = UDim2.new(0, 400, 0, 300);
         ZIndex = 100;
         Parent = ScreenGui;
     });
 
     Library:Create('UIListLayout', {
-        Padding = UDim.new(0, 4);
+        Padding = UDim.new(0, 6);
         FillDirection = Enum.FillDirection.Vertical;
         SortOrder = Enum.SortOrder.LayoutOrder;
         Parent = Library.NotificationArea;
@@ -3921,92 +3924,73 @@ end;
 function Library:Notify(Text, Time)
     local XSize, YSize = Library:GetTextBounds(Text, Library.Font, 14);
 
-    YSize = YSize + 7
+    local Width = XSize + 28;
+    local Height = math.max(YSize + 14, 30);
 
-    local NotifyOuter = Library:Create('Frame', {
-        BackgroundColor3 = Library.MainColor;
-        BorderSizePixel = 0;
-        Position = UDim2.new(0, 100, 0, 10);
-        Size = UDim2.new(0, 0, 0, YSize);
-        ClipsDescendants = true;
+    -- The list layout owns the holder's slot, so the panel animates inside it
+    -- rather than fighting the layout for its own position.
+    local Holder = Library:Create('Frame', {
+        BackgroundTransparency = 1;
+        Size = UDim2.new(0, Width, 0, 0);
         ZIndex = 100;
         Parent = Library.NotificationArea;
     });
 
-    Library:ApplyRound(NotifyOuter, Library.Radius.Control, 'OutlineColor');
-
-    local NotifyInner = Library:Create('Frame', {
-        BackgroundTransparency = 1;
+    local NotifyOuter = Library:Create('Frame', {
+        BackgroundColor3 = Library.BackgroundColor;
         BorderSizePixel = 0;
-        Size = UDim2.new(1, 0, 1, 0);
-        ZIndex = 101;
-        Parent = NotifyOuter;
+        Position = UDim2.new(0, -(Width + 40), 0, 0);
+        Size = UDim2.new(0, Width, 0, Height);
+        ZIndex = 100;
+        Parent = Holder;
     });
 
+    Library:ApplyRound(NotifyOuter, Library.Radius.Panel, 'OutlineColor');
+    Library:AddShadow(NotifyOuter, Library.Radius.Panel);
+
+    -- Registered before the accent bar, which reads the parent's registry entry
+    -- to work out what colour to cover itself with.
     Library:AddToRegistry(NotifyOuter, {
-        BackgroundColor3 = 'MainColor';
+        BackgroundColor3 = 'BackgroundColor';
     }, true);
 
-    local InnerFrame = Library:Create('Frame', {
-        BackgroundColor3 = Color3.new(1, 1, 1);
-        BorderSizePixel = 0;
-        Position = UDim2.new(0, 1, 0, 1);
-        Size = UDim2.new(1, -2, 1, -2);
-        ZIndex = 102;
-        Parent = NotifyInner;
-    });
+    Library:AddAccentBar(NotifyOuter, Library.Radius.Panel, 101);
 
-    local Gradient = Library:Create('UIGradient', {
-        Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Library:GetDarkerColor(Library.MainColor)),
-            ColorSequenceKeypoint.new(1, Library.MainColor),
-        });
-        Rotation = -90;
-        Parent = InnerFrame;
-    });
-
-    Library:AddToRegistry(Gradient, {
-        Color = function()
-            return ColorSequence.new({
-                ColorSequenceKeypoint.new(0, Library:GetDarkerColor(Library.MainColor)),
-                ColorSequenceKeypoint.new(1, Library.MainColor),
-            });
-        end
-    });
-
-    local NotifyLabel = Library:CreateLabel({
-        Position = UDim2.new(0, 4, 0, 0);
-        Size = UDim2.new(1, -4, 1, 0);
+    Library:CreateLabel({
+        Position = UDim2.new(0, 12, 0, 1);
+        Size = UDim2.new(1, -24, 1, -1);
         Text = Text;
         TextXAlignment = Enum.TextXAlignment.Left;
         TextSize = 14;
         ZIndex = 103;
-        Parent = InnerFrame;
-    });
-
-    local LeftColor = Library:Create('Frame', {
-        BackgroundColor3 = Library.AccentColor;
-        BorderSizePixel = 0;
-        Position = UDim2.new(0, -1, 0, -1);
-        Size = UDim2.new(0, 3, 1, 2);
-        ZIndex = 104;
         Parent = NotifyOuter;
-    });
-
-    Library:AddToRegistry(LeftColor, {
-        BackgroundColor3 = 'AccentColor';
     }, true);
 
-    pcall(NotifyOuter.TweenSize, NotifyOuter, UDim2.new(0, XSize + 8 + 4, 0, YSize), 'Out', 'Quad', 0.4, true);
+    local Slide = Library.Anim.Notify;
 
-    task.spawn(function()
-        wait(Time or 5);
+    -- Holder grows so the stack below settles down into place, while the panel
+    -- slides in over it from off the left edge.
+    Library:Tween(Holder, { Size = UDim2.new(0, Width, 0, Height) }, Slide * 0.8, Enum.EasingStyle.Quint, Enum.EasingDirection.Out);
+    Library:Tween(NotifyOuter, { Position = UDim2.new(0, 0, 0, 0) }, Slide, Enum.EasingStyle.Quint, Enum.EasingDirection.Out);
 
-        pcall(NotifyOuter.TweenSize, NotifyOuter, UDim2.new(0, 0, 0, YSize), 'Out', 'Quad', 0.4, true);
+    task.delay(Time or 5, function()
+        if not Holder.Parent then
+            return;
+        end;
 
-        wait(0.4);
+        Library:Tween(NotifyOuter, { Position = UDim2.new(0, -(Width + 40), 0, 0) }, Slide * 0.8, Enum.EasingStyle.Quint, Enum.EasingDirection.In);
 
-        NotifyOuter:Destroy();
+        task.wait(Slide * 0.55);
+
+        if not Holder.Parent then
+            return;
+        end;
+
+        Library:Tween(Holder, { Size = UDim2.new(0, Width, 0, 0) }, Slide * 0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.In);
+
+        task.wait(Slide * 0.75);
+
+        Holder:Destroy();
     end);
 end;
 
