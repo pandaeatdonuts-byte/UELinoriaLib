@@ -56,6 +56,7 @@ local Library = {
         Button = 0.14;
         ColorPicker = 0.2;
         Hover = 0.14;
+        Depbox = 0.22;
         Pop = 0.32;
         DragBlurSize = 10;
         MenuBlurSize = 10;
@@ -199,8 +200,10 @@ Library.CornerRadius = 12;
 -- to half the shorter side, so anything at or past half a control's height simply
 -- renders as a full pill rather than overflowing.
 Library.Radius = {
-    Pill = 1;       -- 2px dividers and accent bars, already round at that height
-    Tiny = 3;       -- tab and nested-tab sliders
+    -- Thin bars: dividers and the sliding tab accents. Deliberately larger than
+    -- any bar is tall, because UICorner clamps to half the shorter side, so this
+    -- always lands on a true stadium instead of a barely-rounded rectangle.
+    Pill = 8;
     Small = 8;      -- inner fills, hue bar, colour swatches
     Control = 10;   -- toggles, sliders, textboxes, dropdowns, tooltips
     Panel = 14;     -- window, groupboxes, colour picker, watermark
@@ -3002,7 +3005,14 @@ do
 
         local MAX_DROPDOWN_ITEMS = 8;
         local DROPDOWN_RADIUS = Library.Radius.Control;
-        local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + 2;
+
+        -- Item rows are square and full width. Butted straight against the far
+        -- edge they sit inside the shell's corner arc, and their fill eats into
+        -- the outline there, which shows up as chipped corners on the accent.
+        -- This margin keeps the rows clear of the curve.
+        local LIST_INSET = 4;
+
+        local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + LIST_INSET;
         local Scrolling;
         local Seam;
 
@@ -3125,9 +3135,10 @@ do
 
             if Scrolling then
                 -- The trigger occupies the top slot, or the bottom one when the
-                -- list had to open upwards.
-                Scrolling.Position = UDim2.new(0, 0, 0, Flipped and 0 or Head);
-                Scrolling.Size = UDim2.new(1, 0, 1, -Head);
+                -- list had to open upwards. The inset always lands on the end away
+                -- from the trigger, which is the end with the rounded corners.
+                Scrolling.Position = UDim2.new(0, 0, 0, Flipped and LIST_INSET or Head);
+                Scrolling.Size = UDim2.new(1, 0, 1, -(Head + LIST_INSET));
             end;
 
             if Seam then
@@ -3360,9 +3371,11 @@ do
                 Buttons[Button] = Table;
             end;
 
-            Scrolling.CanvasSize = UDim2.fromOffset(0, (Count * 20) + 1);
+            Scrolling.CanvasSize = UDim2.fromOffset(0, Count * 20);
 
-            local Y = math.clamp(Count * 20, 0, MAX_DROPDOWN_ITEMS * 20) + 1;
+            -- Height of the shell's list half: the visible rows plus the margin
+            -- that keeps them out of the rounded corners.
+            local Y = math.clamp(Count * 20, 0, MAX_DROPDOWN_ITEMS * 20) + LIST_INSET;
 
             -- The height just changed, so whether it still fits below may have too.
             DropdownListHeight = Y;
@@ -3534,13 +3547,18 @@ do
         local Groupbox = self;
         local Container = Groupbox.Container;
 
+        -- Clips so the contents are revealed by the height animation rather than
+        -- spilling past the collapsing holder.
         local Holder = Library:Create('Frame', {
             BackgroundTransparency = 1;
+            ClipsDescendants = true;
             Size = UDim2.new(1, 0, 0, 0);
             Visible = false;
             Parent = Container;
         });
 
+        -- Pinned to the content height instead of the holder's, so the children
+        -- keep their layout while the holder slides shut around them.
         local Frame = Library:Create('Frame', {
             BackgroundTransparency = 1;
             Size = UDim2.new(1, 0, 1, 0);
@@ -3554,33 +3572,86 @@ do
             Parent = Frame;
         });
 
+        local Expanded = false;
+        local Initialized = false;
+        local SizeTween;
+
+        local function ContentHeight()
+            return Layout.AbsoluteContentSize.Y;
+        end;
+
+        local function SetHeight(Duration)
+            local Goal = UDim2.new(1, 0, 0, Expanded and ContentHeight() or 0);
+
+            if SizeTween then
+                SizeTween:Cancel();
+                SizeTween = nil;
+            end;
+
+            if Expanded then
+                Holder.Visible = true;
+            end;
+
+            if not Duration or Duration <= 0 then
+                Holder.Size = Goal;
+                Holder.Visible = Expanded;
+                Groupbox:Resize();
+                return;
+            end;
+
+            SizeTween = Library:Tween(Holder, { Size = Goal }, Duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
+
+            if not Expanded and SizeTween then
+                SizeTween.Completed:Connect(function()
+                    -- Guard against a re-open landing before the collapse finishes.
+                    if not Expanded then
+                        Holder.Visible = false;
+                    end;
+                end);
+            end;
+        end;
+
         function Depbox:Resize()
-            Holder.Size = UDim2.new(1, 0, 0, Layout.AbsoluteContentSize.Y);
-            Groupbox:Resize();
+            Frame.Size = UDim2.new(1, 0, 0, ContentHeight());
+
+            -- Content changed rather than the toggle, so track it without
+            -- animating; the open and close animation comes from Update.
+            SetHeight(0);
         end;
 
         Layout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
             Depbox:Resize();
         end);
 
-        Holder:GetPropertyChangedSignal('Visible'):Connect(function()
-            Depbox:Resize();
+        -- The groupbox sums its children's heights, so it has to re-measure on
+        -- every frame of the slide, not just at the ends of it.
+        Holder:GetPropertyChangedSignal('Size'):Connect(function()
+            Groupbox:Resize();
         end);
 
         function Depbox:Update()
+            local ShouldShow = true;
+
             for _, Dependency in next, Depbox.Dependencies do
                 local Elem = Dependency[1];
                 local Value = Dependency[2];
 
                 if Elem.Type == 'Toggle' and Elem.Value ~= Value then
-                    Holder.Visible = false;
-                    Depbox:Resize();
-                    return;
+                    ShouldShow = false;
+                    break;
                 end;
             end;
 
-            Holder.Visible = true;
-            Depbox:Resize();
+            if Initialized and ShouldShow == Expanded then
+                return;
+            end;
+
+            Expanded = ShouldShow;
+
+            -- The first pass runs while the menu is still being built, so settle
+            -- straight into place instead of animating open on load.
+            SetHeight(Initialized and Library.Anim.Depbox or 0);
+            Initialized = true;
         end;
 
         function Depbox:SetupDependencies(Dependencies)
@@ -4023,19 +4094,20 @@ function Library:CreateWindow(...)
         Parent = TabArea;
     });
 
-    -- Shared sliding pill under the active main tab (bottom edge).
+    -- Shared sliding pill under the active main tab (bottom edge). Three pixels
+    -- rather than two so the rounded ends are actually visible.
     local TabSlider = Library:Create('Frame', {
         BackgroundColor3 = Library.AccentColor;
         BorderSizePixel = 0;
         AnchorPoint = Vector2.new(0, 1);
         Position = UDim2.new(0, 4, 1, -2);
-        Size = UDim2.new(0, 0, 0, 2);
+        Size = UDim2.new(0, 0, 0, 3);
         Visible = false;
         ZIndex = 5;
         Parent = TabBarInner;
     });
 
-    Library:AddCorner(TabSlider, Library.Radius.Tiny);
+    Library:AddCorner(TabSlider, Library.Radius.Pill);
     Library:AddToRegistry(TabSlider, {
         BackgroundColor3 = 'AccentColor';
     });
@@ -4048,7 +4120,7 @@ function Library:CreateWindow(...)
         local RelX = Button.AbsolutePosition.X - TabBarInner.AbsolutePosition.X;
         local Width = math.max(Button.AbsoluteSize.X - 10, 8);
         local GoalPos = UDim2.new(0, RelX + 5, 1, -2);
-        local GoalSize = UDim2.new(0, Width, 0, 2);
+        local GoalSize = UDim2.new(0, Width, 0, 3);
 
         TabSlider.Visible = true;
 
@@ -4382,18 +4454,19 @@ function Library:CreateWindow(...)
                 Parent = TabboxButtons;
             });
 
-            -- Shared top accent that slides between nested tabs.
+            -- Shared top accent that slides between nested tabs. Three pixels
+            -- rather than two so the rounded ends are actually visible.
             local NestedSlider = Library:Create('Frame', {
                 BackgroundColor3 = Library.AccentColor;
                 BorderSizePixel = 0;
                 Position = UDim2.new(0, 6, 0, 1);
-                Size = UDim2.new(0, 0, 0, 2);
+                Size = UDim2.new(0, 0, 0, 3);
                 Visible = false;
                 ZIndex = 10;
                 Parent = BoxInner;
             });
 
-            Library:AddCorner(NestedSlider, Library.Radius.Tiny);
+            Library:AddCorner(NestedSlider, Library.Radius.Pill);
             Library:AddToRegistry(NestedSlider, {
                 BackgroundColor3 = 'AccentColor';
             });
@@ -4406,7 +4479,7 @@ function Library:CreateWindow(...)
                 local RelX = Button.AbsolutePosition.X - BoxInner.AbsolutePosition.X;
                 local Width = math.max(Button.AbsoluteSize.X - 12, 8);
                 local GoalPos = UDim2.new(0, RelX + 6, 0, 1);
-                local GoalSize = UDim2.new(0, Width, 0, 2);
+                local GoalSize = UDim2.new(0, Width, 0, 3);
 
                 NestedSlider.Visible = true;
 
