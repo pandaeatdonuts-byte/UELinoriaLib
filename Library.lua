@@ -51,7 +51,7 @@ local Library = {
         Toggle = 0.18;
         Slider = 0.45;
         SliderDrag = 0.22;
-        Dropdown = 0.28;
+        Dropdown = 0.18;
         Tab = 0.28;
         Button = 0.14;
         ColorPicker = 0.2;
@@ -767,10 +767,12 @@ end;
 
 -- Dropdown lists live on the ScreenGui rather than inside the window, so nothing
 -- closes them implicitly. Anything that hides or replaces the window has to.
-function Library:CloseAllDropdowns(Except)
+-- Pass Instant when whatever is closing them is about to disappear anyway, so a
+-- shell does not linger on screen after the window behind it has gone.
+function Library:CloseAllDropdowns(Except, Instant)
     for Dropdown in next, Library.OpenedDropdowns do
         if Dropdown ~= Except then
-            Dropdown:CloseDropdown();
+            Dropdown:CloseDropdown(Instant);
         end;
     end;
 end;
@@ -938,7 +940,7 @@ end
 function Library:Unload()
     Library.MenuOpen = false;
 
-    Library:CloseAllDropdowns();
+    Library:CloseAllDropdowns(nil, true);
     table.clear(Library.OpenedDropdowns);
     table.clear(Library.OpenedFrames);
 
@@ -3049,6 +3051,11 @@ do
         -- would have to track is a different instance that the trigger overlaps.
         local Hovered = false;
 
+        -- Logical open state. Distinct from ListOuter.Visible, which stays true
+        -- through the closing animation; a click landing in that window has to
+        -- reopen rather than close again.
+        local Open = false;
+
         local function SetTriggerRaised(Raised)
             for Inst, Base in next, TriggerZ do
                 Inst.ZIndex = Raised and (TRIGGER_Z_OPEN + (Base - 5)) or Base;
@@ -3078,6 +3085,17 @@ do
             return H > 0 and H or DropdownOuter.Size.Y.Offset;
         end;
 
+        -- 0 while shut, 1 while fully open. The shell is always drawn at the
+        -- trigger's size plus this much of the list, so animating it slides the
+        -- panel out from behind the trigger and the clip reveals the rows.
+        local Openness = 0;
+
+        -- Rounded, so the growing edge lands on whole pixels rather than shimmering
+        -- along a fractional boundary.
+        local function GrownHeight()
+            return math.floor((DropdownListHeight * Openness) + 0.5);
+        end;
+
         local function RecalculateListPosition()
             local X = math.floor(DropdownOuter.AbsolutePosition.X + 0.5);
             local Top = math.floor(DropdownOuter.AbsolutePosition.Y + 0.5);
@@ -3086,7 +3104,7 @@ do
 
             -- The panel wraps the trigger rather than sitting under it, so its top
             -- edge is the trigger's top edge (or the list's, when flipped up).
-            local Y = Flipped and (Top - DropdownListHeight) or Top;
+            local Y = Flipped and (Top - GrownHeight()) or Top;
 
             -- Keep the panel on screen horizontally as well; a groupbox near the
             -- right edge would otherwise push it off. Width comes from the trigger
@@ -3130,22 +3148,84 @@ do
             -- outline and no seam between two stacked boxes.
             ListOuter.Size = UDim2.fromOffset(
                 math.floor(DropdownOuter.AbsoluteSize.X + 0.5),
-                DropdownListHeight + Head
+                GrownHeight() + Head
             );
 
             if Scrolling then
-                -- The trigger occupies the top slot, or the bottom one when the
-                -- list had to open upwards. The inset always lands on the end away
-                -- from the trigger, which is the end with the rounded corners.
-                Scrolling.Position = UDim2.new(0, 0, 0, Flipped and LIST_INSET or Head);
-                Scrolling.Size = UDim2.new(1, 0, 1, -(Head + LIST_INSET));
+                -- Anchored to the trigger's edge, with a fixed offset height, so
+                -- the rows hold still while the shell grows past them instead of
+                -- stretching with it. The inset always lands on the end away from
+                -- the trigger, which is the end with the rounded corners.
+                local Items = math.max(DropdownListHeight - LIST_INSET, 0);
+
+                Scrolling.Size = UDim2.new(1, 0, 0, Items);
+                Scrolling.Position = Flipped
+                    and UDim2.new(0, 0, 1, -(Head + Items))
+                    or UDim2.new(0, 0, 0, Head);
             end;
 
             if Seam then
-                Seam.Position = UDim2.new(0, 4, 0, (Flipped and DropdownListHeight or Head) - 2);
+                Seam.Position = Flipped
+                    and UDim2.new(0, 4, 1, -(Head + 2))
+                    or UDim2.new(0, 4, 0, Head - 2);
             end;
 
             RecalculateListPosition();
+        end;
+
+        local OpenAnim;
+
+        local function StopOpenAnim()
+            if OpenAnim then
+                OpenAnim:Disconnect();
+                OpenAnim = nil;
+            end;
+        end;
+
+        -- Openness is a plain number rather than an instance property, so it is
+        -- stepped by hand instead of going through TweenService. Reopening
+        -- mid-close picks up from wherever it got to.
+        local function AnimateOpenness(Goal, Duration, OnDone)
+            StopOpenAnim();
+
+            if not Duration or Duration <= 0 then
+                Openness = Goal;
+                RecalculateListSize();
+
+                if OnDone then
+                    OnDone();
+                end;
+
+                return;
+            end;
+
+            local Start = Openness;
+            local Elapsed = 0;
+
+            OpenAnim = RenderStepped:Connect(function(Delta)
+                -- Unloading destroys the ScreenGui; do not keep stepping geometry
+                -- on instances that no longer exist.
+                if not ListOuter.Parent then
+                    StopOpenAnim();
+                    return;
+                end;
+
+                Elapsed = Elapsed + Delta;
+
+                local T = math.clamp(Elapsed / Duration, 0, 1);
+                local Eased = 1 - ((1 - T) * (1 - T)); -- quad out, as elsewhere
+
+                Openness = Start + ((Goal - Start) * Eased);
+                RecalculateListSize();
+
+                if T >= 1 then
+                    StopOpenAnim();
+
+                    if OnDone then
+                        OnDone();
+                    end;
+                end;
+            end);
         end;
 
         DropdownOuter:GetPropertyChangedSignal('AbsolutePosition'):Connect(RecalculateListPosition);
@@ -3159,8 +3239,8 @@ do
 
         if ScrollHost then
             ScrollHost:GetPropertyChangedSignal('CanvasPosition'):Connect(function()
-                if ListOuter.Visible then
-                    Dropdown:CloseDropdown();
+                if Open then
+                    Dropdown:CloseDropdown(true);
                 end;
             end);
         end;
@@ -3380,7 +3460,7 @@ do
             -- The height just changed, so whether it still fits below may have too.
             DropdownListHeight = Y;
 
-            if ListOuter.Visible then
+            if Open then
                 RecalculateListDirection();
             end;
 
@@ -3398,7 +3478,7 @@ do
         -- The shell spans the trigger and the items, so its rect is the whole
         -- control. Used for both the hover accent and the click-outside test.
         function Dropdown:PointInside(Pos)
-            if not ListOuter.Visible then
+            if not Open then
                 return false;
             end;
 
@@ -3421,29 +3501,45 @@ do
             -- Two lists open at once would overlap each other on the popup layer.
             Library:CloseAllDropdowns(Dropdown);
 
+            Open = true;
             ListOuter.Visible = true;
+
+            -- Direction is chosen from the full height, before the shell has
+            -- grown into it, or a list would start downwards and then not fit.
             RecalculateListDirection();
             SetTriggerRaised(true);
-            RecalculateListSize();
 
             Library.OpenedFrames[ListOuter] = true;
             Library.OpenedDropdowns[Dropdown] = true;
-            DropdownArrow.Rotation = 180;
+
+            Library:Tween(DropdownArrow, { Rotation = 180 }, Library.Anim.Dropdown, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
+            AnimateOpenness(1, Library.Anim.Dropdown);
 
             -- The cursor is already on the trigger, and no mouse movement is
             -- coming to tell us that, so seed the hover state here.
             Dropdown:UpdateHover();
         end;
 
-        function Dropdown:CloseDropdown()
-            ListOuter.Visible = false;
-            Flipped = false;
-            SetTriggerRaised(false);
+        function Dropdown:CloseDropdown(Instant)
+            Open = false;
 
             Library.OpenedFrames[ListOuter] = nil;
             Library.OpenedDropdowns[Dropdown] = nil;
-            DropdownArrow.Rotation = 0;
-            RecalculateListSize();
+
+            -- Drop the accent now so it fades out alongside the slide.
+            Hovered = false;
+            Library:SetStrokeColor(ListStroke, 'OutlineColor');
+
+            Library:Tween(DropdownArrow, { Rotation = 0 }, Instant and 0 or Library.Anim.Dropdown, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
+
+            AnimateOpenness(0, Instant and 0 or Library.Anim.Dropdown, function()
+                -- The shell covers the trigger for the whole slide, so the trigger
+                -- only takes its own fill and outline back once it is gone.
+                ListOuter.Visible = false;
+                Flipped = false;
+                SetTriggerRaised(false);
+                RecalculateListSize();
+            end);
         end;
 
         function Dropdown:OnChanged(Func)
@@ -3481,7 +3577,7 @@ do
                 return;
             end;
 
-            if ListOuter.Visible then
+            if Open then
                 -- Our own list is registered as an opened frame and overlaps the
                 -- trigger's bottom edge, so MouseIsOverOpenedFrame would blank out
                 -- that band. A click that reaches the trigger always toggles.
@@ -4284,7 +4380,7 @@ function Library:CreateWindow(...)
 
         function Tab:ShowTab()
             -- A list left open on the outgoing tab would float over the new one.
-            Library:CloseAllDropdowns();
+            Library:CloseAllDropdowns(nil, true);
 
             for _, OtherTab in next, Window.Tabs do
                 OtherTab:HideTab();
@@ -4348,9 +4444,12 @@ function Library:CreateWindow(...)
 
             local Highlight = Library:AddAccentBar(BoxOuter, Library.Radius.Panel, 2);
 
+            -- Held clear of the rounded corner: at Radius.Panel the arc is still
+            -- ~5px inside the box at this height, so the old 4px inset put the
+            -- first glyph underneath the outline.
             local GroupboxLabel = Library:CreateLabel({
-                Size = UDim2.new(1, 0, 0, 18);
-                Position = UDim2.new(0, 4, 0, 2);
+                Size = UDim2.new(1, -14, 0, 18);
+                Position = UDim2.new(0, 10, 0, 3);
                 TextSize = 14;
                 Text = Info.Name;
                 TextXAlignment = Enum.TextXAlignment.Left;
@@ -4381,7 +4480,9 @@ function Library:CreateWindow(...)
                     end;
                 end;
 
-                BoxOuter.Size = UDim2.new(1, 0, 0, 20 + Size + 2 + 2);
+                -- The tail has to clear the bottom corner arc, not just the flat
+                -- edge, or the last row's corners cross the outline.
+                BoxOuter.Size = UDim2.new(1, 0, 0, 20 + Size + 10);
             end;
 
             Groupbox.Container = Container;
@@ -4438,11 +4539,12 @@ function Library:CreateWindow(...)
 
             Library:AddAccentBar(BoxOuter, Library.Radius.Panel, 3);
 
-            -- Nested tabs: accent bar on top of the active tab.
+            -- Nested tabs: accent bar on top of the active tab. Inset far enough
+            -- that the outer buttons clear the panel's rounded corners.
             local TabboxButtons = Library:Create('Frame', {
                 BackgroundTransparency = 1;
-                Position = UDim2.new(0, 0, 0, 2);
-                Size = UDim2.new(1, 0, 0, 18);
+                Position = UDim2.new(0, 8, 0, 4);
+                Size = UDim2.new(1, -16, 0, 18);
                 ZIndex = 5;
                 Parent = BoxInner;
             });
@@ -4550,7 +4652,7 @@ function Library:CreateWindow(...)
                 });
 
                 function Tab:Show()
-                    Library:CloseAllDropdowns();
+                    Library:CloseAllDropdowns(nil, true);
 
                     for _, OtherTab in next, Tabbox.Tabs do
                         OtherTab:Hide();
@@ -4599,7 +4701,9 @@ function Library:CreateWindow(...)
                         end;
                     end;
 
-                    BoxOuter.Size = UDim2.new(1, 0, 0, 20 + Size + 2 + 2);
+                    -- Container starts at 22 here, so the tail is measured from
+                    -- there to leave the same clearance as a plain groupbox.
+                    BoxOuter.Size = UDim2.new(1, 0, 0, 22 + Size + 10);
                 end;
 
                 Button.InputBegan:Connect(function(Input)
@@ -4709,7 +4813,7 @@ function Library:CreateWindow(...)
 
         -- Dropdown lists are siblings of the window, so the fade below never
         -- reaches them; without this they hang on screen after the menu closes.
-        Library:CloseAllDropdowns();
+        Library:CloseAllDropdowns(nil, true);
 
         ModalElement.Modal = Toggled;
         Library.MenuOpen = Toggled;
