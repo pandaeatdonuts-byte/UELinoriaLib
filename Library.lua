@@ -2153,30 +2153,18 @@ do
         }
 
         Groupbox:AddBlank(2);
-        local DividerOuter = Library:Create('Frame', {
-            BackgroundColor3 = Color3.new(0, 0, 0);
-            BorderColor3 = Color3.new(0, 0, 0);
-            Size = UDim2.new(1, -4, 0, 5);
+        local DividerLine = Library:Create('Frame', {
+            BackgroundColor3 = Library.OutlineColor;
+            BorderSizePixel = 0;
+            Size = UDim2.new(1, -8, 0, 2);
             ZIndex = 5;
             Parent = Container;
         });
 
-        local DividerInner = Library:Create('Frame', {
-            BackgroundColor3 = Library.MainColor;
-            BorderColor3 = Library.OutlineColor;
-            BorderMode = Enum.BorderMode.Inset;
-            Size = UDim2.new(1, 0, 1, 0);
-            ZIndex = 6;
-            Parent = DividerOuter;
-        });
+        Library:AddCorner(DividerLine, 1);
 
-        Library:AddToRegistry(DividerOuter, {
-            BorderColor3 = 'Black';
-        });
-
-        Library:AddToRegistry(DividerInner, {
-            BackgroundColor3 = 'MainColor';
-            BorderColor3 = 'OutlineColor';
+        Library:AddToRegistry(DividerLine, {
+            BackgroundColor3 = 'OutlineColor';
         });
 
         Groupbox:AddBlank(9);
@@ -3018,7 +3006,7 @@ do
                         BackgroundColor3 = Library.OutlineColor;
                         BorderSizePixel = 0;
                         Position = UDim2.new(0, 8, 0, 0);
-                        Size = UDim2.new(1, -16, 0, 1);
+                        Size = UDim2.new(1, -16, 0, 2);
                         ZIndex = 23;
                         Parent = Button;
                     });
