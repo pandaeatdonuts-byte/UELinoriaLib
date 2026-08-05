@@ -3193,7 +3193,7 @@ do
             end;
 
             Dropdown:CloseDropdown();
-        end);
+        end));
 
         Dropdown:BuildDropdownList();
         Dropdown:Display();
