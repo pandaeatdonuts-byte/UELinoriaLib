@@ -644,6 +644,23 @@ function Library:AddToolTip(InfoStr, HoverInstance)
     end)
 end
 
+-- Recolour a rounded element's outline. ApplyRound draws outlines with a UIStroke
+-- rather than BorderColor3, so this also keeps the theme registry in step, or a
+-- later theme change would snap the stroke back to its build-time colour.
+function Library:SetStrokeColor(Stroke, ColorIdx)
+    if not Stroke then
+        return;
+    end;
+
+    Library:Tween(Stroke, { Color = Library[ColorIdx] or ColorIdx }, Library.Anim.Hover, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
+
+    local StrokeReg = Library.RegistryMap[Stroke];
+
+    if StrokeReg and StrokeReg.Properties.Color then
+        StrokeReg.Properties.Color = ColorIdx;
+    end;
+end;
+
 function Library:OnHighlight(HighlightInstance, Instance, Properties, PropertiesDefault)
     local function ApplyProps(Props)
         local Reg = Library.RegistryMap[Instance];
@@ -654,12 +671,7 @@ function Library:OnHighlight(HighlightInstance, Instance, Properties, Properties
             local Color = Library[ColorIdx] or ColorIdx;
 
             if Property == 'BorderColor3' and Stroke then
-                Library:Tween(Stroke, { Color = Color }, Library.Anim.Hover, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
-
-                local StrokeReg = Library.RegistryMap[Stroke];
-                if StrokeReg and StrokeReg.Properties.Color then
-                    StrokeReg.Properties.Color = ColorIdx;
-                end;
+                Library:SetStrokeColor(Stroke, ColorIdx);
             else
                 Goals[Property] = Color;
 
@@ -2871,6 +2883,20 @@ do
             [DropdownArrow] = DropdownArrow.ZIndex;
         };
 
+        local ListOuter = Library:Create('Frame', {
+            BackgroundColor3 = Library.MainColor;
+            BorderSizePixel = 0;
+            ClipsDescendants = true;
+            ZIndex = LIST_Z;
+            Visible = false;
+            Parent = ScreenGui;
+        });
+
+        local ListStroke = Library:ApplyRound(ListOuter, DROPDOWN_RADIUS, 'OutlineColor');
+        Library:AddToRegistry(ListOuter, {
+            BackgroundColor3 = 'MainColor';
+        });
+
         local function SetTriggerRaised(Raised)
             for Inst, Base in next, TriggerZ do
                 Inst.ZIndex = Raised and (TRIGGER_Z_OPEN + (Base - 5)) or Base;
@@ -2884,21 +2910,12 @@ do
             if DropdownStroke then
                 DropdownStroke.Transparency = Raised and 1 or 0;
             end;
+
+            -- The shell now owns the visible outline, so it takes over the accent
+            -- the trigger shows on hover. Being open counts as engaged, so it
+            -- holds the accent for as long as it stays open.
+            Library:SetStrokeColor(ListStroke, Raised and 'AccentColor' or 'OutlineColor');
         end;
-
-        local ListOuter = Library:Create('Frame', {
-            BackgroundColor3 = Library.MainColor;
-            BorderSizePixel = 0;
-            ClipsDescendants = true;
-            ZIndex = LIST_Z;
-            Visible = false;
-            Parent = ScreenGui;
-        });
-
-        Library:ApplyRound(ListOuter, DROPDOWN_RADIUS, 'OutlineColor');
-        Library:AddToRegistry(ListOuter, {
-            BackgroundColor3 = 'MainColor';
-        });
 
         -- true when the list had to open upwards because it would not fit below.
         local Flipped = false;
