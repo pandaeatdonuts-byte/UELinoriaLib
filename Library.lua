@@ -545,26 +545,40 @@ function Library:MakeResizable(Instance, MinSize, MaxSize)
             return;
         end;
 
-        local StartPos = Instance.Position;
-        local StartSize = Instance.AbsoluteSize;
-        local Anchor = Instance.AnchorPoint;
-        local StartMouse = Vector2.new(Mouse.X, Mouse.Y);
+        local StartSize = Instance.Size;
+        local DragStart = Input.Position;
+        local ChangedConn;
+        local EndedConn;
 
-        while InputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
-            local Delta = Vector2.new(Mouse.X, Mouse.Y) - StartMouse;
-            local NewSize = Vector2.new(
-                math.clamp(StartSize.X + Delta.X, MinSize.X, MaxSize.X),
-                math.clamp(StartSize.Y + Delta.Y, MinSize.Y, MaxSize.Y)
-            );
+        ChangedConn = InputService.InputChanged:Connect(function(Change)
+            if Change.UserInputType ~= Enum.UserInputType.MouseMovement then
+                return;
+            end;
 
-            Instance.Size = UDim2.fromOffset(NewSize.X, NewSize.Y);
-            Instance.Position = UDim2.fromOffset(
-                StartPos.X.Offset + (NewSize.X - StartSize.X) * Anchor.X,
-                StartPos.Y.Offset + (NewSize.Y - StartSize.Y) * Anchor.Y
-            );
+            local Delta = Change.Position - DragStart;
+            local NewW = math.clamp(StartSize.X.Offset + Delta.X, MinSize.X, MaxSize.X);
+            local NewH = math.clamp(StartSize.Y.Offset + Delta.Y, MinSize.Y, MaxSize.Y);
 
-            RenderStepped:Wait();
+            Instance.Size = UDim2.new(StartSize.X.Scale, NewW, StartSize.Y.Scale, NewH);
+        end);
+
+        local function StopResize()
+            if ChangedConn then
+                ChangedConn:Disconnect();
+                ChangedConn = nil;
+            end;
+
+            if EndedConn then
+                EndedConn:Disconnect();
+                EndedConn = nil;
+            end;
         end;
+
+        EndedConn = InputService.InputEnded:Connect(function(Ended)
+            if Ended.UserInputType == Enum.UserInputType.MouseButton1 then
+                StopResize();
+            end;
+        end);
     end);
 
     return Grip;
@@ -2831,7 +2845,7 @@ do
             BackgroundColor3 = Library.MainColor;
             BorderSizePixel = 0;
             ClipsDescendants = true;
-            ZIndex = 20;
+            ZIndex = 4;
             Visible = false;
             Parent = ScreenGui;
         });
@@ -2841,24 +2855,12 @@ do
             BackgroundColor3 = 'MainColor';
         });
 
-        local ListFlat = Library:Create('Frame', {
-            Name = 'ListFlat';
-            BackgroundColor3 = Library.MainColor;
-            BorderSizePixel = 0;
-            Size = UDim2.new(1, 0, 0, DROPDOWN_RADIUS);
-            Visible = false;
-            ZIndex = 22;
-            Parent = ListOuter;
-        });
-
-        Library:AddToRegistry(ListFlat, {
-            BackgroundColor3 = 'MainColor';
-        });
-
         local function RecalculateListPosition()
+            local Join = ListOuter.Visible and DROPDOWN_RADIUS or 0;
+
             ListOuter.Position = UDim2.fromOffset(
                 math.floor(DropdownOuter.AbsolutePosition.X + 0.5),
-                math.floor(DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y - 1 + 0.5)
+                math.floor(DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y - Join + 0.5)
             );
         end;
 
@@ -2867,10 +2869,17 @@ do
                 DropdownListHeight = YSize;
             end;
 
+            local Join = ListOuter.Visible and DROPDOWN_RADIUS or 0;
+
             ListOuter.Size = UDim2.fromOffset(
                 math.floor(DropdownOuter.AbsoluteSize.X + 0.5),
-                DropdownListHeight
+                DropdownListHeight + Join
             );
+
+            if Scrolling then
+                Scrolling.Position = UDim2.new(0, 0, 0, Join);
+                Scrolling.Size = UDim2.new(1, 0, 1, -Join);
+            end;
 
             RecalculateListPosition();
         end;
@@ -2883,9 +2892,8 @@ do
         local ListInner = Library:Create('Frame', {
             BackgroundTransparency = 1;
             BorderSizePixel = 0;
-            Position = UDim2.new(0, 0, 0, DROPDOWN_RADIUS);
-            Size = UDim2.new(1, 0, 1, -DROPDOWN_RADIUS);
-            ZIndex = 21;
+            Size = UDim2.new(1, 0, 1, 0);
+            ZIndex = 4;
             Parent = ListOuter;
         });
 
@@ -2893,9 +2901,8 @@ do
             BackgroundTransparency = 1;
             BorderSizePixel = 0;
             CanvasSize = UDim2.new(0, 0, 0, 0);
-            Position = UDim2.new(0, 0, 0, 0);
             Size = UDim2.new(1, 0, 1, 0);
-            ZIndex = 21;
+            ZIndex = 4;
             Parent = ListInner;
 
             TopImage = 'rbxasset://textures/ui/Scroll/scroll-middle.png',
@@ -2979,8 +2986,8 @@ do
                 local Button = Library:Create('TextButton', {
                     BackgroundColor3 = Library.MainColor;
                     BorderSizePixel = 0;
-                    Size = UDim2.new(1, -1, 0, 20);
-                    ZIndex = 22;
+                    Size = UDim2.new(1, 0, 0, 20);
+                    ZIndex = 5;
                     Text = '';
                     AutoButtonColor = false;
                     Parent = Scrolling;
@@ -2990,37 +2997,20 @@ do
                     BackgroundColor3 = 'MainColor';
                 });
 
-                if Count > 1 then
-                    local Separator = Library:Create('Frame', {
-                        BackgroundColor3 = Library.OutlineColor;
-                        BorderSizePixel = 0;
-                        Position = UDim2.new(0, 8, 0, 0);
-                        Size = UDim2.new(1, -16, 0, 2);
-                        ZIndex = 23;
-                        Parent = Button;
-                    });
-
-                    Library:AddCorner(Separator, 1);
-
-                    Library:AddToRegistry(Separator, {
-                        BackgroundColor3 = 'OutlineColor';
-                    });
-                end;
-
                 local ButtonLabel = Library:CreateLabel({
                     Active = false;
-                    Size = UDim2.new(1, -6, 1, 0);
-                    Position = UDim2.new(0, 6, 0, 0);
+                    Size = UDim2.new(1, -10, 1, 0);
+                    Position = UDim2.new(0, 8, 0, 0);
                     TextSize = 14;
                     Text = Value;
                     TextXAlignment = Enum.TextXAlignment.Left;
-                    ZIndex = 23;
+                    ZIndex = 6;
                     Parent = Button;
                 });
 
                 Library:OnHighlight(Button, Button,
-                    { BackgroundColor3 = 'BackgroundColor', ZIndex = 23 },
-                    { BackgroundColor3 = 'MainColor', ZIndex = 22 }
+                    { BackgroundColor3 = 'BackgroundColor' },
+                    { BackgroundColor3 = 'MainColor' }
                 );
 
                 local Selected;
@@ -3103,18 +3093,17 @@ do
         end;
 
         function Dropdown:OpenDropdown()
-            ListFlat.Visible = true;
-            RecalculateListSize();
             ListOuter.Visible = true;
+            RecalculateListSize();
             Library.OpenedFrames[ListOuter] = true;
             DropdownArrow.Rotation = 180;
         end;
 
         function Dropdown:CloseDropdown()
-            ListFlat.Visible = false;
             ListOuter.Visible = false;
             Library.OpenedFrames[ListOuter] = nil;
             DropdownArrow.Rotation = 0;
+            RecalculateListSize();
         end;
 
         function Dropdown:OnChanged(Func)
