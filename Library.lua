@@ -188,7 +188,7 @@ function Library:Create(Class, Properties)
     return _Instance;
 end;
 
-Library.CornerRadius = 10;
+Library.CornerRadius = 12;
 
 function Library:AddCorner(Parent, Radius)
     local Corner = Parent:FindFirstChildOfClass('UICorner');
@@ -427,16 +427,25 @@ function Library:SetDragVisual(Instance, Enabled)
     end;
 end;
 
--- Drag using a hit target (title bar / full frame). Uses UIS so child labels cannot eat the drag.
+-- Drag using a hit target. Grab offset is from the frame top-left so anchor point cannot desync the cursor.
 function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
     local Hit = Handle or Instance;
     Hit.Active = true;
     Instance.Active = true;
 
     local Dragging = false;
-    local Grab = Vector2.zero;
+    local RelGrab = Vector2.zero;
+    local DragSize = Vector2.zero;
+    local DragAnchor = Vector2.zero;
     local MoveConn;
     local EndConn;
+
+    local function SetTopLeft(TopLeft)
+        Instance.Position = UDim2.fromOffset(
+            TopLeft.X + DragSize.X * DragAnchor.X,
+            TopLeft.Y + DragSize.Y * DragAnchor.Y
+        );
+    end;
 
     local function StopDrag()
         if not Dragging then
@@ -470,25 +479,20 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
         end;
 
         local MousePos = InputService:GetMouseLocation();
-        local RelY = MousePos.Y - Instance.AbsolutePosition.Y;
+        local AbsPos = Instance.AbsolutePosition;
+        local RelY = MousePos.Y - AbsPos.Y;
 
         if Cutoff and RelY > Cutoff then
             return;
         end;
 
-        local AbsPos = Instance.AbsolutePosition;
-        local AbsSize = Instance.AbsoluteSize;
-        local Anchor = Instance.AnchorPoint;
-        Instance.Position = UDim2.fromOffset(
-            AbsPos.X + AbsSize.X * Anchor.X,
-            AbsPos.Y + AbsSize.Y * Anchor.Y
-        );
+        DragSize = Instance.AbsoluteSize;
+        DragAnchor = Instance.AnchorPoint;
 
-        Grab = Vector2.new(
-            MousePos.X - Instance.Position.X.Offset,
-            MousePos.Y - Instance.Position.Y.Offset
-        );
+        -- Snap to pixel offsets before tracking so scale/anchor combos do not jump.
+        SetTopLeft(AbsPos);
 
+        RelGrab = MousePos - AbsPos;
         Dragging = true;
 
         if GhostWhileDrag then
@@ -501,8 +505,7 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
             end;
 
             if Change.UserInputType == Enum.UserInputType.MouseMovement then
-                local Pos = InputService:GetMouseLocation();
-                Instance.Position = UDim2.fromOffset(Pos.X - Grab.X, Pos.Y - Grab.Y);
+                SetTopLeft(InputService:GetMouseLocation() - RelGrab);
             end;
         end);
 
@@ -1514,7 +1517,7 @@ do
             Parent = ToggleLabel;
         });
 
-        Library:ApplyRound(PickOuter, 4, 'OutlineColor');
+        Library:ApplyRound(PickOuter, 8, 'OutlineColor');
 
         local PickInner = Library:Create('Frame', {
             BackgroundTransparency = 1;
@@ -1937,7 +1940,7 @@ do
                 ZIndex = 5;
             });
 
-            Library:ApplyRound(Outer, 6, 'OutlineColor');
+            Library:ApplyRound(Outer, 9, 'OutlineColor');
 
             local Inner = Library:Create('Frame', {
                 BackgroundColor3 = Library.MainColor;
@@ -2191,7 +2194,7 @@ do
             Parent = Container;
         });
 
-        Library:ApplyRound(TextBoxOuter, 6, 'OutlineColor');
+        Library:ApplyRound(TextBoxOuter, 9, 'OutlineColor');
 
         local TextBoxInner = Library:Create('Frame', {
             BackgroundTransparency = 1;
@@ -2366,7 +2369,7 @@ do
             Parent = Container;
         });
 
-        local ToggleStroke = Library:ApplyRound(ToggleOuter, 4, 'OutlineColor');
+        local ToggleStroke = Library:ApplyRound(ToggleOuter, 8, 'OutlineColor');
 
         Library:AddToRegistry(ToggleOuter, {
             BackgroundColor3 = 'MainColor';
@@ -2522,7 +2525,7 @@ do
             Parent = Container;
         });
 
-        Library:ApplyRound(SliderOuter, 6, 'OutlineColor');
+        Library:ApplyRound(SliderOuter, 9, 'OutlineColor');
 
         Library:AddToRegistry(SliderOuter, {
             BackgroundColor3 = 'MainColor';
@@ -2746,34 +2749,19 @@ do
             end;
         end;
 
-        local DropdownOuter = Library:Create('Frame', {
+        local DropdownOuter = Library:Create('TextButton', {
             BackgroundColor3 = Library.MainColor;
             BorderSizePixel = 0;
             Size = UDim2.new(1, -4, 0, 20);
             ZIndex = 5;
+            Text = '';
+            AutoButtonColor = false;
             Parent = Container;
         });
 
-        Library:ApplyRound(DropdownOuter, 6, 'OutlineColor');
-        local DropdownCorner = DropdownOuter:FindFirstChildOfClass('UICorner');
-        local HeaderStroke = DropdownOuter:FindFirstChild('RoundStroke');
+        Library:ApplyRound(DropdownOuter, 9, 'OutlineColor');
 
         Library:AddToRegistry(DropdownOuter, {
-            BackgroundColor3 = 'MainColor';
-        });
-
-        -- Squares the header’s bottom corners while open so it can join the list.
-        local HeaderSeam = Library:Create('Frame', {
-            BackgroundColor3 = Library.MainColor;
-            BorderSizePixel = 0;
-            Position = UDim2.new(0, 1, 1, -7);
-            Size = UDim2.new(1, -2, 0, 8);
-            Visible = false;
-            ZIndex = 9;
-            Parent = DropdownOuter;
-        });
-
-        Library:AddToRegistry(HeaderSeam, {
             BackgroundColor3 = 'MainColor';
         });
 
@@ -2806,11 +2794,11 @@ do
 
         local ItemList = Library:CreateLabel({
             Position = UDim2.new(0, 5, 0, 0);
-            Size = UDim2.new(1, -5, 1, 0);
+            Size = UDim2.new(1, -20, 1, 0);
             TextSize = 14;
             Text = '--';
             TextXAlignment = Enum.TextXAlignment.Left;
-            TextWrapped = true;
+            TextTruncate = Enum.TextTruncate.AtEnd;
             ZIndex = 7;
             Parent = DropdownInner;
         });
@@ -2832,23 +2820,31 @@ do
             BackgroundColor3 = Library.MainColor;
             BorderSizePixel = 0;
             ClipsDescendants = true;
-            ZIndex = 20;
+            ZIndex = 500;
             Visible = false;
             Parent = ScreenGui;
         });
 
-        Library:ApplyRound(ListOuter, 6, 'OutlineColor');
+        Library:ApplyRound(ListOuter, 9, 'OutlineColor');
         Library:AddToRegistry(ListOuter, {
             BackgroundColor3 = 'MainColor';
         });
 
         local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + 2;
+        local OpenUp = false;
 
         local function RecalculateListPosition()
-            ListOuter.Position = UDim2.fromOffset(
-                DropdownOuter.AbsolutePosition.X,
-                DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y
-            );
+            local X = DropdownOuter.AbsolutePosition.X;
+            local Y = DropdownOuter.AbsolutePosition.Y;
+            local W = DropdownOuter.AbsoluteSize.X;
+            local H = DropdownOuter.AbsoluteSize.Y;
+            local ListH = ListOuter.Size.Y.Offset;
+
+            if OpenUp then
+                ListOuter.Position = UDim2.fromOffset(X, Y - ListH);
+            else
+                ListOuter.Position = UDim2.fromOffset(X, Y + H);
+            end;
         end;
 
         local function RecalculateListSize(YSize)
@@ -2863,6 +2859,7 @@ do
 
         RecalculateListSize();
 
+        ListOuter:GetPropertyChangedSignal('Size'):Connect(RecalculateListPosition);
         DropdownOuter:GetPropertyChangedSignal('AbsolutePosition'):Connect(RecalculateListPosition);
         DropdownOuter:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
             RecalculateListSize(DropdownListHeight);
@@ -3092,12 +3089,11 @@ do
             ListOuter.Visible = true;
             Library.OpenedFrames[ListOuter] = true;
 
-            if HeaderStroke then
-                HeaderStroke.Enabled = false;
-            end;
-            HeaderSeam.Visible = true;
-
             local W = DropdownOuter.AbsoluteSize.X;
+            local Screen = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080);
+            local DropY = DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y + DropdownListHeight;
+            OpenUp = DropY > Screen.Y - 8;
+
             ListOuter.Size = UDim2.fromOffset(W, 0);
             RecalculateListPosition();
 
@@ -3105,10 +3101,11 @@ do
                 Size = UDim2.fromOffset(W, DropdownListHeight);
             }, Library.Anim.Dropdown, Enum.EasingStyle.Quint, Enum.EasingDirection.Out);
 
-            Library:Tween(DropdownArrow, { Rotation = 180 }, Library.Anim.Dropdown, Enum.EasingStyle.Back, Enum.EasingDirection.Out);
+            Library:Tween(DropdownArrow, { Rotation = OpenUp and 0 or 180 }, Library.Anim.Dropdown, Enum.EasingStyle.Back, Enum.EasingDirection.Out);
 
             IgnoreClick = true;
             task.defer(function()
+                RecalculateListPosition();
                 IgnoreClick = false;
             end);
         end;
@@ -3136,10 +3133,6 @@ do
                     ListOuter.Visible = false;
                     ListOuter:SetAttribute('Closing', false);
                     Library.OpenedFrames[ListOuter] = nil;
-                    HeaderSeam.Visible = false;
-                    if HeaderStroke then
-                        HeaderStroke.Enabled = true;
-                    end;
                 end;
             end);
         end;
@@ -3174,12 +3167,7 @@ do
             Library:SafeCallback(Dropdown.Changed, Dropdown.Value);
         end;
 
-        DropdownOuter.InputBegan:Connect(function(Input)
-            if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then
-                return;
-            end;
-
-            -- Allow toggle even while this dropdown's list is open.
+        DropdownOuter.MouseButton1Click:Connect(function()
             if Library:MouseIsOverOpenedFrame() and not Library:IsMouseOverFrame(ListOuter) then
                 return;
             end;
@@ -3191,7 +3179,7 @@ do
             end;
         end);
 
-        InputService.InputBegan:Connect(function(Input)
+        Library:GiveSignal(InputService.InputBegan:Connect(function(Input)
             if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then
                 return;
             end;
@@ -3492,7 +3480,7 @@ function Library:Notify(Text, Time)
         Parent = Library.NotificationArea;
     });
 
-    Library:ApplyRound(NotifyOuter, 6, 'OutlineColor');
+    Library:ApplyRound(NotifyOuter, 9, 'OutlineColor');
 
     local NotifyInner = Library:Create('Frame', {
         BackgroundTransparency = 1;
@@ -3596,11 +3584,11 @@ function Library:CreateWindow(...)
         Tabs = {};
     };
 
-    local Outer = Library:Create('CanvasGroup', {
+    local Outer = Library:Create('Frame', {
         AnchorPoint = Config.AnchorPoint,
         BackgroundColor3 = Library.MainColor;
         BorderSizePixel = 0;
-        GroupTransparency = 0;
+        ClipsDescendants = true;
         Position = Config.Position,
         Size = Config.Size,
         Visible = false;
@@ -3716,7 +3704,7 @@ function Library:CreateWindow(...)
         Parent = Inner;
     });
 
-    Library:ApplyRound(TabBarOuter, 6, 'OutlineColor');
+    Library:ApplyRound(TabBarOuter, 9, 'OutlineColor');
 
     Library:AddToRegistry(TabBarOuter, {
         BackgroundColor3 = 'BackgroundColor';
@@ -3798,7 +3786,7 @@ function Library:CreateWindow(...)
         Parent = Inner;
     });
 
-    Library:ApplyRound(MainSectionOuter, 6, 'OutlineColor');
+    Library:ApplyRound(MainSectionOuter, 9, 'OutlineColor');
 
     Library:AddToRegistry(MainSectionOuter, {
         BackgroundColor3 = 'BackgroundColor';
@@ -3826,7 +3814,7 @@ function Library:CreateWindow(...)
         Parent = MainSectionInner;
     });
 
-    Library:ApplyRound(TabContainer, 6, 'OutlineColor');
+    Library:ApplyRound(TabContainer, 9, 'OutlineColor');
 
     Library:AddToRegistry(TabContainer, {
         BackgroundColor3 = 'MainColor';
@@ -4308,6 +4296,12 @@ function Library:CreateWindow(...)
 
     local Toggled = false;
     local Fading = false;
+    local TransparencyCache = {};
+
+    local function ShouldSkipFade(Desc)
+        local Name = Desc.Name;
+        return Name == 'WindowBackdrop' or Name == 'TitleDrag' or Name == 'DragHit' or Name == 'ResizeGrip';
+    end;
 
     function Library:Toggle()
         if Fading then
@@ -4322,22 +4316,56 @@ function Library:CreateWindow(...)
 
         if Toggled then
             Outer.Visible = true;
-            Outer.GroupTransparency = 1;
             Library:SetMenuBlur(true);
         else
             Library:SetMenuBlur(false);
         end;
 
-        -- CanvasGroup fades the whole window evenly (avoids accent-rim blue flashes).
-        local FadeTween = Library:Tween(Outer, {
-            GroupTransparency = Toggled and 0 or 1;
-        }, FadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
+        local function FadeProp(Inst, Prop)
+            if ShouldSkipFade(Inst) then
+                return;
+            end;
 
-        if FadeTween then
-            FadeTween.Completed:Wait();
-        else
-            task.wait(FadeTime);
+            local Cache = TransparencyCache[Inst];
+            if not Cache then
+                Cache = {};
+                TransparencyCache[Inst] = Cache;
+            end;
+
+            if Cache[Prop] == nil then
+                Cache[Prop] = Inst[Prop];
+            end;
+
+            if Cache[Prop] == 1 then
+                return;
+            end;
+
+            TweenService:Create(Inst, TweenInfo.new(FadeTime, Enum.EasingStyle.Linear), {
+                [Prop] = Toggled and Cache[Prop] or 1;
+            }):Play();
         end;
+
+        FadeProp(Outer, 'BackgroundTransparency');
+
+        for _, Desc in next, Outer:GetDescendants() do
+            if ShouldSkipFade(Desc) then
+                continue;
+            end;
+
+            if Desc:IsA('ImageLabel') then
+                FadeProp(Desc, 'ImageTransparency');
+                FadeProp(Desc, 'BackgroundTransparency');
+            elseif Desc:IsA('TextLabel') or Desc:IsA('TextBox') or Desc:IsA('TextButton') then
+                FadeProp(Desc, 'TextTransparency');
+                FadeProp(Desc, 'BackgroundTransparency');
+            elseif Desc:IsA('Frame') or Desc:IsA('ScrollingFrame') then
+                FadeProp(Desc, 'BackgroundTransparency');
+            elseif Desc:IsA('UIStroke') then
+                FadeProp(Desc, 'Transparency');
+            end;
+        end;
+
+        task.wait(FadeTime);
 
         Outer.Visible = Toggled;
         Fading = false;
