@@ -3879,6 +3879,9 @@ function Library:CreateWindow(...)
             end);
         end;
 
+        Tab.TabButton = TabButton;
+        Tab.TabButtonLabel = TabButtonLabel;
+
         function Tab:ShowTab()
             for _, OtherTab in next, Window.Tabs do
                 OtherTab:HideTab();
@@ -3889,12 +3892,20 @@ function Library:CreateWindow(...)
             Window.ActiveTabIndex = Tab.Index;
             TabFrame.Visible = true;
             TabFrame.Position = UDim2.new(0, 0, 0, 0);
+
+            if Window.UpdateFadeCache then
+                Window:UpdateFadeCache(TabButtonLabel, 'TextTransparency', 0);
+            end;
         end;
 
         function Tab:HideTab()
             Library:Tween(TabButtonLabel, { TextTransparency = 0.35 }, Library.Anim.Tab * 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
             TabFrame.Visible = false;
             TabFrame.Position = UDim2.new(0, 0, 0, 0);
+
+            if Window.UpdateFadeCache then
+                Window:UpdateFadeCache(TabButtonLabel, 'TextTransparency', 0.35);
+            end;
         end;
 
         function Tab:SetLayoutOrder(Position)
@@ -4256,6 +4267,26 @@ function Library:CreateWindow(...)
     local Fading = false;
     local TransparencyCache = {};
 
+    function Window:UpdateFadeCache(Instance, Property, Value)
+        local Cache = TransparencyCache[Instance];
+        if Cache then
+            Cache[Property] = Value;
+        end;
+    end;
+
+    local function RefreshActiveTab()
+        if Window.ActiveTabIndex <= 0 then
+            return;
+        end;
+
+        for _, Tab in next, Window.Tabs do
+            if Tab.Index == Window.ActiveTabIndex then
+                Tab:ShowTab();
+                return;
+            end;
+        end;
+    end;
+
     local function ShouldSkipFade(Desc)
         local Name = Desc.Name;
         return Name == 'WindowBackdrop' or Name == 'TitleDrag' or Name == 'DragHit' or Name == 'ResizeGrip';
@@ -4327,6 +4358,10 @@ function Library:CreateWindow(...)
 
         Outer.Visible = Toggled;
         Fading = false;
+
+        if Toggled then
+            RefreshActiveTab();
+        end;
     end
 
     Library:GiveSignal(InputService.InputBegan:Connect(function(Input, Processed)
