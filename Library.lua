@@ -1,4 +1,5 @@
 local InputService = game:GetService('UserInputService');
+local GuiService = game:GetService('GuiService');
 local TextService = game:GetService('TextService');
 local CoreGui = game:GetService('CoreGui');
 local Teams = game:GetService('Teams');
@@ -17,6 +18,15 @@ ProtectGui(ScreenGui);
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global;
 ScreenGui.IgnoreGuiInset = true;
 ScreenGui.Parent = CoreGui;
+
+local PopupLayer = Instance.new('Frame');
+PopupLayer.Name = 'PopupLayer';
+PopupLayer.BackgroundTransparency = 1;
+PopupLayer.BorderSizePixel = 0;
+PopupLayer.Size = UDim2.fromScale(1, 1);
+PopupLayer.ZIndex = 1000;
+PopupLayer.Active = false;
+PopupLayer.Parent = ScreenGui;
 
 local Toggles = {};
 local Options = {};
@@ -64,6 +74,7 @@ local Library = {
 
     DragBlur = nil;
     MenuOpen = false;
+    PopupLayer = PopupLayer;
 };
 
 Library._ActiveTweens = setmetatable({}, { __mode = 'k' });
@@ -478,7 +489,7 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
             return;
         end;
 
-        local MousePos = InputService:GetMouseLocation();
+        local MousePos = Library:GetMouse();
         local AbsPos = Instance.AbsolutePosition;
         local RelY = MousePos.Y - AbsPos.Y;
 
@@ -505,7 +516,7 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
             end;
 
             if Change.UserInputType == Enum.UserInputType.MouseMovement then
-                SetTopLeft(InputService:GetMouseLocation() - RelGrab);
+                SetTopLeft(Library:GetMouse() - RelGrab);
             end;
         end);
 
@@ -570,12 +581,12 @@ function Library:MakeResizable(Instance, MinSize, MaxSize)
             AbsPos.Y + AbsSize.Y * Anchor.Y
         );
 
-        local StartMouse = InputService:GetMouseLocation();
+        local StartMouse = Library:GetMouse();
         local StartSize = Vector2.new(Instance.AbsoluteSize.X, Instance.AbsoluteSize.Y);
         local StartPos = Vector2.new(Instance.Position.X.Offset, Instance.Position.Y.Offset);
 
         while InputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
-            local Pos = InputService:GetMouseLocation();
+            local Pos = Library:GetMouse();
             local Delta = Pos - StartMouse;
             local NewSize = Vector2.new(
                 math.clamp(StartSize.X + Delta.X, MinSize.X, MaxSize.X),
@@ -699,10 +710,9 @@ function Library:OnHighlight(HighlightInstance, Instance, Properties, Properties
     end)
 end;
 
--- ScreenGui.IgnoreGuiInset = true, so AbsolutePosition is in full-screen space.
--- PlayerMouse.X/Y are inset-relative and will miss hit tests / open menus.
+-- ScreenGui.IgnoreGuiInset = true, so mouse must include the top-bar inset to match AbsolutePosition.
 function Library:GetMouse()
-    return InputService:GetMouseLocation();
+    return InputService:GetMouseLocation() + GuiService:GetGuiInset();
 end;
 
 function Library:MouseIsOverOpenedFrame()
@@ -2820,9 +2830,9 @@ do
             BackgroundColor3 = Library.MainColor;
             BorderSizePixel = 0;
             ClipsDescendants = true;
-            ZIndex = 500;
+            ZIndex = 1001;
             Visible = false;
-            Parent = ScreenGui;
+            Parent = Library.PopupLayer;
         });
 
         Library:ApplyRound(ListOuter, 9, 'OutlineColor');
@@ -2831,35 +2841,23 @@ do
         });
 
         local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + 2;
-        local OpenUp = false;
 
         local function RecalculateListPosition()
-            local X = DropdownOuter.AbsolutePosition.X;
-            local Y = DropdownOuter.AbsolutePosition.Y;
-            local W = DropdownOuter.AbsoluteSize.X;
-            local H = DropdownOuter.AbsoluteSize.Y;
-            local ListH = ListOuter.Size.Y.Offset;
-
-            if OpenUp then
-                ListOuter.Position = UDim2.fromOffset(X, Y - ListH);
-            else
-                ListOuter.Position = UDim2.fromOffset(X, Y + H);
-            end;
+            ListOuter.AnchorPoint = Vector2.new(0, 0);
+            ListOuter.Position = UDim2.fromOffset(
+                DropdownOuter.AbsolutePosition.X,
+                DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y + 1
+            );
         end;
 
         local function RecalculateListSize(YSize)
             DropdownListHeight = YSize or (MAX_DROPDOWN_ITEMS * 20 + 2);
-            if ListOuter.Visible and not ListOuter:GetAttribute('Closing') then
-                ListOuter.Size = UDim2.fromOffset(DropdownOuter.AbsoluteSize.X, DropdownListHeight);
-            elseif not ListOuter.Visible then
-                ListOuter.Size = UDim2.fromOffset(DropdownOuter.AbsoluteSize.X, 0);
-            end;
+            ListOuter.Size = UDim2.fromOffset(DropdownOuter.AbsoluteSize.X, DropdownListHeight);
             RecalculateListPosition();
         end;
 
         RecalculateListSize();
 
-        ListOuter:GetPropertyChangedSignal('Size'):Connect(RecalculateListPosition);
         DropdownOuter:GetPropertyChangedSignal('AbsolutePosition'):Connect(RecalculateListPosition);
         DropdownOuter:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
             RecalculateListSize(DropdownListHeight);
@@ -2869,7 +2867,7 @@ do
             BackgroundTransparency = 1;
             BorderSizePixel = 0;
             Size = UDim2.new(1, 0, 1, 0);
-            ZIndex = 21;
+            ZIndex = 1001;
             Parent = ListOuter;
         });
 
@@ -2878,7 +2876,7 @@ do
             BorderSizePixel = 0;
             CanvasSize = UDim2.new(0, 0, 0, 0);
             Size = UDim2.new(1, 0, 1, 0);
-            ZIndex = 21;
+            ZIndex = 1001;
             Parent = ListInner;
 
             TopImage = 'rbxasset://textures/ui/Scroll/scroll-middle.png',
@@ -2961,7 +2959,7 @@ do
                     BackgroundColor3 = Library.MainColor;
                     BorderSizePixel = 0;
                     Size = UDim2.new(1, -1, 0, 20);
-                    ZIndex = 23;
+                    ZIndex = 1002;
                     Text = '';
                     AutoButtonColor = false;
                     Parent = Scrolling;
@@ -2995,13 +2993,13 @@ do
                     TextSize = 14;
                     Text = Value;
                     TextXAlignment = Enum.TextXAlignment.Left;
-                    ZIndex = 25;
+                    ZIndex = 1003;
                     Parent = Button;
                 });
 
                 Library:OnHighlight(Button, Button,
-                    { BackgroundColor3 = 'BackgroundColor', ZIndex = 24 },
-                    { BackgroundColor3 = 'MainColor', ZIndex = 23 }
+                    { BackgroundColor3 = 'BackgroundColor', ZIndex = 1003 },
+                    { BackgroundColor3 = 'MainColor', ZIndex = 1002 }
                 );
 
                 local Selected;
@@ -3084,57 +3082,21 @@ do
         end;
 
         function Dropdown:OpenDropdown()
-            ListOuter:SetAttribute('Closing', false);
-            ListOuter:SetAttribute('CloseToken', (ListOuter:GetAttribute('CloseToken') or 0) + 1);
+            RecalculateListSize(DropdownListHeight);
             ListOuter.Visible = true;
             Library.OpenedFrames[ListOuter] = true;
-
-            local W = DropdownOuter.AbsoluteSize.X;
-            local Screen = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080);
-            local DropY = DropdownOuter.AbsolutePosition.Y + DropdownOuter.AbsoluteSize.Y + DropdownListHeight;
-            OpenUp = DropY > Screen.Y - 8;
-
-            ListOuter.Size = UDim2.fromOffset(W, 0);
-            RecalculateListPosition();
-
-            Library:Tween(ListOuter, {
-                Size = UDim2.fromOffset(W, DropdownListHeight);
-            }, Library.Anim.Dropdown, Enum.EasingStyle.Quint, Enum.EasingDirection.Out);
-
-            Library:Tween(DropdownArrow, { Rotation = OpenUp and 0 or 180 }, Library.Anim.Dropdown, Enum.EasingStyle.Back, Enum.EasingDirection.Out);
+            DropdownArrow.Rotation = 180;
 
             IgnoreClick = true;
             task.defer(function()
-                RecalculateListPosition();
                 IgnoreClick = false;
             end);
         end;
 
         function Dropdown:CloseDropdown()
-            if not ListOuter.Visible and not ListOuter:GetAttribute('Closing') then
-                return;
-            end;
-
-            ListOuter:SetAttribute('Closing', true);
-
-            local Token = (ListOuter:GetAttribute('CloseToken') or 0) + 1;
-            ListOuter:SetAttribute('CloseToken', Token);
-
-            local W = DropdownOuter.AbsoluteSize.X;
-
-            Library:Tween(ListOuter, {
-                Size = UDim2.fromOffset(W, 0);
-            }, Library.Anim.Dropdown * 0.85, Enum.EasingStyle.Quint, Enum.EasingDirection.In);
-
-            Library:Tween(DropdownArrow, { Rotation = 0 }, Library.Anim.Dropdown);
-
-            task.delay(Library.Anim.Dropdown * 0.85, function()
-                if ListOuter:GetAttribute('CloseToken') == Token and ListOuter:GetAttribute('Closing') then
-                    ListOuter.Visible = false;
-                    ListOuter:SetAttribute('Closing', false);
-                    Library.OpenedFrames[ListOuter] = nil;
-                end;
-            end);
+            ListOuter.Visible = false;
+            Library.OpenedFrames[ListOuter] = nil;
+            DropdownArrow.Rotation = 0;
         end;
 
         function Dropdown:OnChanged(Func)
