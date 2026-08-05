@@ -572,35 +572,58 @@ function Library:MakeResizable(Instance, MinSize, MaxSize)
         AutoButtonColor = false;
         BackgroundTransparency = 1;
         BorderSizePixel = 0;
-        Size = UDim2.fromOffset(18, 18);
-        Position = UDim2.new(1, -2, 1, -2);
+        Size = UDim2.fromOffset(16, 16);
+        Position = UDim2.new(1, -6, 1, -6);
         AnchorPoint = Vector2.new(1, 1);
         ZIndex = 50;
         Parent = Instance;
     });
 
-    local GripIcon = Library:CreateLabel({
-        BackgroundTransparency = 1;
-        Size = UDim2.fromOffset(16, 16);
-        Position = UDim2.new(1, 0, 1, 0);
-        AnchorPoint = Vector2.new(1, 1);
-        Text = '◢';
-        TextSize = 14;
-        TextColor3 = Library.OutlineColor;
-        TextXAlignment = Enum.TextXAlignment.Right;
-        TextYAlignment = Enum.TextYAlignment.Bottom;
-        ZIndex = 51;
-        Parent = Grip;
-    });
+    -- Three soft rounded dots along the corner diagonal (matches rounded chrome).
+    local GripDots = {};
+    local DotLayout = {
+        { X = 10, Y = 10 },
+        { X = 6, Y = 10 },
+        { X = 10, Y = 6 },
+    };
 
-    Library:AddToRegistry(GripIcon, {
-        TextColor3 = 'OutlineColor';
-    });
+    for _, Offset in next, DotLayout do
+        local Dot = Library:Create('Frame', {
+            BackgroundColor3 = Library.OutlineColor;
+            BorderSizePixel = 0;
+            Position = UDim2.fromOffset(Offset.X, Offset.Y);
+            Size = UDim2.fromOffset(4, 4);
+            ZIndex = 51;
+            Parent = Grip;
+        });
 
-    Library:OnHighlight(Grip, GripIcon,
-        { TextColor3 = 'AccentColor' },
-        { TextColor3 = 'OutlineColor' }
-    );
+        Library:AddCorner(Dot, 2);
+        Library:AddToRegistry(Dot, {
+            BackgroundColor3 = 'OutlineColor';
+        });
+
+        table.insert(GripDots, Dot);
+    end;
+
+    Grip.MouseEnter:Connect(function()
+        for _, Dot in next, GripDots do
+            Library:Tween(Dot, { BackgroundColor3 = Library.AccentColor }, Library.Anim.Hover);
+            local Reg = Library.RegistryMap[Dot];
+            if Reg then
+                Reg.Properties.BackgroundColor3 = 'AccentColor';
+            end;
+        end;
+    end);
+
+    Grip.MouseLeave:Connect(function()
+        for _, Dot in next, GripDots do
+            Library:Tween(Dot, { BackgroundColor3 = Library.OutlineColor }, Library.Anim.Hover);
+            local Reg = Library.RegistryMap[Dot];
+            if Reg then
+                Reg.Properties.BackgroundColor3 = 'OutlineColor';
+            end;
+        end;
+    end);
 
     Grip.InputBegan:Connect(function(Input)
         if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then
