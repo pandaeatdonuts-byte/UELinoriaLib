@@ -60,6 +60,10 @@ local Library = {
         DragBlurSize = 10;
         MenuBlurSize = 10;
         DragAlpha = 0.12;
+
+        -- How far dragging trails the cursor, as a time constant in seconds.
+        -- Higher is looser; 0 pins the frame to the cursor exactly.
+        DragSmoothing = 0.055;
     };
 
     DragBlur = nil;
@@ -189,6 +193,18 @@ function Library:Create(Class, Properties)
 end;
 
 Library.CornerRadius = 12;
+
+-- Corner radii in pixels, kept in one place so the whole menu rounds together
+-- instead of drifting between hardcoded values at each call site. UICorner clamps
+-- to half the shorter side, so anything at or past half a control's height simply
+-- renders as a full pill rather than overflowing.
+Library.Radius = {
+    Pill = 1;       -- 2px dividers and accent bars, already round at that height
+    Tiny = 3;       -- tab and nested-tab sliders
+    Small = 8;      -- inner fills, hue bar, colour swatches
+    Control = 10;   -- toggles, sliders, textboxes, dropdowns, tooltips
+    Panel = 14;     -- window, groupboxes, colour picker, watermark
+};
 
 function Library:AddCorner(Parent, Radius)
     local Corner = Parent:FindFirstChildOfClass('UICorner');
@@ -433,6 +449,9 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
     Hit.Active = true;
     Instance.Active = true;
 
+    -- The coast-to-a-stop tween from the previous drag, if it is still running.
+    local SettleTween;
+
     Hit.InputBegan:Connect(function(Input)
         if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then
             return;
@@ -449,11 +468,23 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
             end;
         end;
 
+        -- Grabbing again mid-coast would leave the tween writing Position on the
+        -- same frames as the drag does, so stop it before reading the start point.
+        if SettleTween then
+            SettleTween:Cancel();
+            SettleTween = nil;
+        end;
+
         local StartPos = Instance.Position;
         local DragStart = Input.Position;
         local Dragging = true;
         local MoveConn;
         local EndConn;
+        local StepConn;
+
+        -- Where the cursor says the frame should be. The frame eases toward this
+        -- rather than snapping to it, so dragging trails slightly behind.
+        local Target = StartPos;
 
         if GhostWhileDrag then
             Library:SetDragVisual(Instance, true);
@@ -465,11 +496,29 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
             end;
 
             local Delta = Change.Position - DragStart;
-            Instance.Position = UDim2.new(
+            Target = UDim2.new(
                 StartPos.X.Scale, StartPos.X.Offset + Delta.X,
                 StartPos.Y.Scale, StartPos.Y.Offset + Delta.Y
             );
+
+            if Library.Anim.DragSmoothing <= 0 then
+                Instance.Position = Target;
+            end;
         end);
+
+        if Library.Anim.DragSmoothing > 0 then
+            StepConn = RenderStepped:Connect(function(Delta)
+                if not Dragging then
+                    return;
+                end;
+
+                -- Exponential ease, so the trail feels the same at any framerate
+                -- instead of getting snappier as FPS rises.
+                local Alpha = 1 - math.exp(-Delta / Library.Anim.DragSmoothing);
+
+                Instance.Position = Instance.Position:Lerp(Target, math.clamp(Alpha, 0, 1));
+            end);
+        end;
 
         local function StopDrag()
             if not Dragging then
@@ -486,6 +535,14 @@ function Library:MakeDraggable(Instance, Cutoff, GhostWhileDrag, Handle)
             if EndConn then
                 EndConn:Disconnect();
                 EndConn = nil;
+            end;
+
+            if StepConn then
+                StepConn:Disconnect();
+                StepConn = nil;
+
+                -- Let it coast the last few pixels instead of snapping on release.
+                SettleTween = Library:Tween(Instance, { Position = Target }, Library.Anim.DragSmoothing * 2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out);
             end;
 
             if GhostWhileDrag then
@@ -598,7 +655,7 @@ function Library:AddToolTip(InfoStr, HoverInstance)
         Visible = false,
     })
 
-    Library:ApplyRound(Tooltip, 8, 'OutlineColor');
+    Library:ApplyRound(Tooltip, Library.Radius.Control, 'OutlineColor');
 
     local Label = Library:CreateLabel({
         Position = UDim2.fromOffset(3, 1),
@@ -766,36 +823,83 @@ end;
 Library.AccentColorDark = Library:GetDarkerColor(Library.AccentColor);
 
 function Library:AddToRegistry(Instance, Properties, IsHud)
-    local Idx = #Library.Registry + 1;
-    local Data = {
-        Instance = Instance;
-        Properties = Properties;
-        Idx = Idx;
-    };
+    local Data = Library.RegistryMap[Instance];
 
-    table.insert(Library.Registry, Data);
-    Library.RegistryMap[Instance] = Data;
+    -- ApplyRound can run more than once over the same element, which used to file
+    -- a second entry for the same stroke. Only the newest was ever reachable
+    -- through RegistryMap, so the older one lingered and kept getting themed.
+    if Data then
+        for Property, ColorIdx in next, Properties do
+            Data.Properties[Property] = ColorIdx;
+        end;
+    else
+        local Idx = #Library.Registry + 1;
 
-    if IsHud then
-        table.insert(Library.HudRegistry, Data);
+        Data = {
+            Instance = Instance;
+            Properties = Properties;
+            Idx = Idx;
+        };
+
+        Library.Registry[Idx] = Data;
+        Library.RegistryMap[Instance] = Data;
     end;
+
+    if IsHud and not Data.HudIdx then
+        local HudIdx = #Library.HudRegistry + 1;
+
+        Data.HudIdx = HudIdx;
+        Library.HudRegistry[HudIdx] = Data;
+    end;
+end;
+
+-- Order in the registry does not matter, so drop an entry by moving the last one
+-- into its slot. Idx and HudIdx track where each entry currently lives.
+local function SwapRemoveEntry(List, Data, Field)
+    local Idx = Data[Field];
+
+    if not Idx then
+        return;
+    end;
+
+    if List[Idx] ~= Data then
+        -- Should not happen, but never leave a dead instance behind: fall back to
+        -- the exhaustive scan rather than silently keeping it.
+        for Scan = #List, 1, -1 do
+            if List[Scan] == Data then
+                Idx = Scan;
+                break;
+            end;
+        end;
+
+        if List[Idx] ~= Data then
+            Data[Field] = nil;
+            return;
+        end;
+    end;
+
+    local Last = #List;
+    local Moved = List[Last];
+
+    List[Idx] = Moved;
+    List[Last] = nil;
+
+    if Moved and Moved ~= Data then
+        Moved[Field] = Idx;
+    end;
+
+    Data[Field] = nil;
 end;
 
 function Library:RemoveFromRegistry(Instance)
     local Data = Library.RegistryMap[Instance];
 
     if Data then
-        for Idx = #Library.Registry, 1, -1 do
-            if Library.Registry[Idx] == Data then
-                table.remove(Library.Registry, Idx);
-            end;
-        end;
-
-        for Idx = #Library.HudRegistry, 1, -1 do
-            if Library.HudRegistry[Idx] == Data then
-                table.remove(Library.HudRegistry, Idx);
-            end;
-        end;
+        -- This runs from DescendantRemoving, so it fires once per destroyed
+        -- instance. Scanning the whole registry each time meant rebuilding one
+        -- long dropdown walked thousands of entries per item.
+        SwapRemoveEntry(Library.Registry, Data, 'Idx');
+        SwapRemoveEntry(Library.HudRegistry, Data, 'HudIdx');
 
         Library.RegistryMap[Instance] = nil;
     end;
@@ -868,6 +972,39 @@ Library:GiveSignal(ScreenGui.DescendantRemoving:Connect(function(Instance)
     end;
 end))
 
+-- One dispatcher for every dropdown rather than a global input connection per
+-- dropdown. Only open dropdowns are in the table, and opening one closes the
+-- rest, so these loops run over at most a single entry.
+Library:GiveSignal(InputService.InputBegan:Connect(function(Input)
+    if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+        return;
+    end;
+
+    if not next(Library.OpenedDropdowns) then
+        return;
+    end;
+
+    local MousePos = Library:GetMouse();
+
+    for Dropdown in next, Library.OpenedDropdowns do
+        -- While open the list panel spans its own trigger, so one rect covers
+        -- both and this stays correct when the list opens upwards.
+        if not Dropdown:PointInside(MousePos) then
+            Dropdown:CloseDropdown();
+        end;
+    end;
+end))
+
+Library:GiveSignal(InputService.InputChanged:Connect(function(Input)
+    if Input.UserInputType ~= Enum.UserInputType.MouseMovement then
+        return;
+    end;
+
+    for Dropdown in next, Library.OpenedDropdowns do
+        Dropdown:UpdateHover();
+    end;
+end))
+
 local BaseAddons = {};
 
 do
@@ -905,7 +1042,7 @@ do
             Parent = ToggleLabel;
         });
 
-        Library:ApplyRound(DisplayFrame, 7, false, false);
+        Library:ApplyRound(DisplayFrame, Library.Radius.Small, false, false);
 
         -- Transparency image taken from https://github.com/matas3535/SplixPrivateDrawingLibrary/blob/main/Library.lua cus i'm lazy
         local CheckerFrame = Library:Create('ImageLabel', {
@@ -917,7 +1054,7 @@ do
             Parent = DisplayFrame;
         });
 
-        Library:AddCorner(CheckerFrame, 6);
+        Library:AddCorner(CheckerFrame, Library.Radius.Small);
 
         -- 1/16/23
         -- Rewrote this to be placed inside the Library ScreenGui
@@ -935,14 +1072,14 @@ do
             Parent = ScreenGui,
         });
 
-        Library:ApplyRound(PickerFrameOuter, 10, 'OutlineColor');
-        Library:AddShadow(PickerFrameOuter, 10);
+        Library:ApplyRound(PickerFrameOuter, Library.Radius.Panel, 'OutlineColor');
+        Library:AddShadow(PickerFrameOuter, Library.Radius.Panel);
 
         Library:AddToRegistry(PickerFrameOuter, {
             BackgroundColor3 = 'MainColor';
         });
 
-        Library:AddAccentBar(PickerFrameOuter, 10, 16);
+        Library:AddAccentBar(PickerFrameOuter, Library.Radius.Panel, 16);
 
         DisplayFrame:GetPropertyChangedSignal('AbsolutePosition'):Connect(function()
             PickerFrameOuter.Position = UDim2.fromOffset(DisplayFrame.AbsolutePosition.X, DisplayFrame.AbsolutePosition.Y + 18);
@@ -969,7 +1106,7 @@ do
             Parent = PickerFrameOuter;
         });
 
-        Library:ApplyRound(SatVibMapOuter, 8, 'OutlineColor');
+        Library:ApplyRound(SatVibMapOuter, Library.Radius.Control, 'OutlineColor');
 
         Library:AddToRegistry(SatVibMapOuter, {
             BackgroundColor3 = 'BackgroundColor';
@@ -1012,7 +1149,7 @@ do
             Parent = PickerFrameOuter;
         });
 
-        Library:ApplyRound(HueSelectorOuter, 6, 'OutlineColor');
+        Library:ApplyRound(HueSelectorOuter, Library.Radius.Small, 'OutlineColor');
 
         Library:AddToRegistry(HueSelectorOuter, {
             BackgroundColor3 = 'BackgroundColor';
@@ -1051,7 +1188,7 @@ do
                 Parent = PickerFrameOuter;
             });
 
-            Library:ApplyRound(Outer, 9, 'OutlineColor');
+            Library:ApplyRound(Outer, Library.Radius.Control, 'OutlineColor');
 
             Library:AddToRegistry(Outer, {
                 BackgroundColor3 = 'MainColor';
@@ -1141,7 +1278,7 @@ do
                 Parent = PickerFrameOuter;
             });
 
-            Library:ApplyRound(TransparencyBoxOuter, 8, 'OutlineColor');
+            Library:ApplyRound(TransparencyBoxOuter, Library.Radius.Control, 'OutlineColor');
 
             Library:AddToRegistry(TransparencyBoxOuter, {
                 BackgroundColor3 = 'BackgroundColor';
@@ -1190,13 +1327,13 @@ do
                 Parent = ScreenGui;
             });
 
-            Library:ApplyRound(ContextMenu.Container, 8, 'OutlineColor');
+            Library:ApplyRound(ContextMenu.Container, Library.Radius.Control, 'OutlineColor');
 
             Library:AddToRegistry(ContextMenu.Container, {
                 BackgroundColor3 = 'MainColor';
             });
 
-            Library:AddAccentBar(ContextMenu.Container, 8, 15);
+            Library:AddAccentBar(ContextMenu.Container, Library.Radius.Control, 15);
 
             ContextMenu.Inner = Library:Create('Frame', {
                 BackgroundTransparency = 1;
@@ -1580,7 +1717,7 @@ do
             Parent = ToggleLabel;
         });
 
-        Library:ApplyRound(PickOuter, 8, 'OutlineColor');
+        Library:ApplyRound(PickOuter, Library.Radius.Control, 'OutlineColor');
 
         local PickInner = Library:Create('Frame', {
             BackgroundTransparency = 1;
@@ -1614,7 +1751,7 @@ do
             Parent = ScreenGui;
         });
 
-        Library:ApplyRound(ModeSelectOuter, 6, 'OutlineColor');
+        Library:ApplyRound(ModeSelectOuter, Library.Radius.Small, 'OutlineColor');
 
         ToggleLabel:GetPropertyChangedSignal('AbsolutePosition'):Connect(function()
             ModeSelectOuter.Position = UDim2.fromOffset(ToggleLabel.AbsolutePosition.X + ToggleLabel.AbsoluteSize.X + 4, ToggleLabel.AbsolutePosition.Y + 1);
@@ -2003,7 +2140,7 @@ do
                 ZIndex = 5;
             });
 
-            Library:ApplyRound(Outer, 9, 'OutlineColor');
+            Library:ApplyRound(Outer, Library.Radius.Control, 'OutlineColor');
 
             local Inner = Library:Create('Frame', {
                 BackgroundColor3 = Library.MainColor;
@@ -2202,7 +2339,7 @@ do
             Parent = Container;
         });
 
-        Library:AddCorner(DividerLine, 1);
+        Library:AddCorner(DividerLine, Library.Radius.Pill);
 
         Library:AddToRegistry(DividerLine, {
             BackgroundColor3 = 'OutlineColor';
@@ -2245,7 +2382,7 @@ do
             Parent = Container;
         });
 
-        Library:ApplyRound(TextBoxOuter, 9, 'OutlineColor');
+        Library:ApplyRound(TextBoxOuter, Library.Radius.Control, 'OutlineColor');
 
         local TextBoxInner = Library:Create('Frame', {
             BackgroundTransparency = 1;
@@ -2420,7 +2557,7 @@ do
             Parent = Container;
         });
 
-        local ToggleStroke = Library:ApplyRound(ToggleOuter, 8, 'OutlineColor');
+        local ToggleStroke = Library:ApplyRound(ToggleOuter, Library.Radius.Control, 'OutlineColor');
 
         Library:AddToRegistry(ToggleOuter, {
             BackgroundColor3 = 'MainColor';
@@ -2576,7 +2713,7 @@ do
             Parent = Container;
         });
 
-        Library:ApplyRound(SliderOuter, 9, 'OutlineColor');
+        Library:ApplyRound(SliderOuter, Library.Radius.Control, 'OutlineColor');
 
         Library:AddToRegistry(SliderOuter, {
             BackgroundColor3 = 'MainColor';
@@ -2591,7 +2728,7 @@ do
             Parent = SliderOuter;
         });
 
-        Library:AddCorner(SliderInner, 6);
+        Library:AddCorner(SliderInner, Library.Radius.Small);
 
         local function SyncMaxSize()
             local Width = math.max(SliderInner.AbsoluteSize.X, 1);
@@ -2608,7 +2745,7 @@ do
             Parent = SliderInner;
         });
 
-        Library:AddCorner(Fill, 6);
+        Library:AddCorner(Fill, Library.Radius.Small);
 
         Library:AddToRegistry(Fill, {
             BackgroundColor3 = 'AccentColor';
@@ -2810,7 +2947,7 @@ do
             Parent = Container;
         });
 
-        local DropdownStroke = Library:ApplyRound(DropdownOuter, 9, 'OutlineColor');
+        local DropdownStroke = Library:ApplyRound(DropdownOuter, Library.Radius.Control, 'OutlineColor');
 
         Library:AddToRegistry(DropdownOuter, {
             BackgroundColor3 = 'MainColor';
@@ -2864,7 +3001,7 @@ do
         end
 
         local MAX_DROPDOWN_ITEMS = 8;
-        local DROPDOWN_RADIUS = 9;
+        local DROPDOWN_RADIUS = Library.Radius.Control;
         local DropdownListHeight = MAX_DROPDOWN_ITEMS * 20 + 2;
         local Scrolling;
         local Seam;
@@ -2897,6 +3034,11 @@ do
             BackgroundColor3 = 'MainColor';
         });
 
+        -- Whether the cursor is over the open shell. The trigger's own OnHighlight
+        -- cannot answer this: its stroke is hidden while open, and the shell it
+        -- would have to track is a different instance that the trigger overlaps.
+        local Hovered = false;
+
         local function SetTriggerRaised(Raised)
             for Inst, Base in next, TriggerZ do
                 Inst.ZIndex = Raised and (TRIGGER_Z_OPEN + (Base - 5)) or Base;
@@ -2911,10 +3053,10 @@ do
                 DropdownStroke.Transparency = Raised and 1 or 0;
             end;
 
-            -- The shell now owns the visible outline, so it takes over the accent
-            -- the trigger shows on hover. Being open counts as engaged, so it
-            -- holds the accent for as long as it stays open.
-            Library:SetStrokeColor(ListStroke, Raised and 'AccentColor' or 'OutlineColor');
+            if not Raised then
+                Hovered = false;
+                Library:SetStrokeColor(ListStroke, 'OutlineColor');
+            end;
         end;
 
         -- true when the list had to open upwards because it would not fit below.
@@ -3050,7 +3192,7 @@ do
             Parent = ListInner;
         });
 
-        Library:AddCorner(Seam, 1);
+        Library:AddCorner(Seam, Library.Radius.Pill);
 
         Library:AddToRegistry(Seam, {
             BackgroundColor3 = 'OutlineColor';
@@ -3240,6 +3382,28 @@ do
             Dropdown:BuildDropdownList();
         end;
 
+        -- The shell spans the trigger and the items, so its rect is the whole
+        -- control. Used for both the hover accent and the click-outside test.
+        function Dropdown:PointInside(Pos)
+            if not ListOuter.Visible then
+                return false;
+            end;
+
+            local AbsPos, AbsSize = ListOuter.AbsolutePosition, ListOuter.AbsoluteSize;
+
+            return Pos.X >= AbsPos.X and Pos.X <= AbsPos.X + AbsSize.X
+                and Pos.Y >= AbsPos.Y and Pos.Y <= AbsPos.Y + AbsSize.Y;
+        end;
+
+        function Dropdown:UpdateHover()
+            local Over = Dropdown:PointInside(Library:GetMouse());
+
+            if Over ~= Hovered then
+                Hovered = Over;
+                Library:SetStrokeColor(ListStroke, Over and 'AccentColor' or 'OutlineColor');
+            end;
+        end;
+
         function Dropdown:OpenDropdown()
             -- Two lists open at once would overlap each other on the popup layer.
             Library:CloseAllDropdowns(Dropdown);
@@ -3252,6 +3416,10 @@ do
             Library.OpenedFrames[ListOuter] = true;
             Library.OpenedDropdowns[Dropdown] = true;
             DropdownArrow.Rotation = 180;
+
+            -- The cursor is already on the trigger, and no mouse movement is
+            -- coming to tell us that, so seed the hover state here.
+            Dropdown:UpdateHover();
         end;
 
         function Dropdown:CloseDropdown()
@@ -3310,27 +3478,8 @@ do
             end;
         end);
 
-        Library:GiveSignal(InputService.InputBegan:Connect(function(Input)
-            if Input.UserInputType ~= Enum.UserInputType.MouseButton1 or not ListOuter.Visible then
-                return;
-            end;
-
-            local MousePos = Library:GetMouse();
-
-            local function Inside(Inst)
-                local AbsPos, AbsSize = Inst.AbsolutePosition, Inst.AbsoluteSize;
-
-                return MousePos.X >= AbsPos.X and MousePos.X <= AbsPos.X + AbsSize.X
-                    and MousePos.Y >= AbsPos.Y and MousePos.Y <= AbsPos.Y + AbsSize.Y;
-            end;
-
-            -- The trigger toggles itself; only close when the click misses both it
-            -- and the list. Testing the two rects directly keeps this correct when
-            -- the list opens upwards.
-            if not (Inside(ListOuter) or Inside(DropdownOuter)) then
-                Dropdown:CloseDropdown();
-            end;
-        end));
+        -- Closing on an outside click is handled by the shared dispatcher next to
+        -- Library:CloseAllDropdowns, which calls Dropdown:PointInside.
 
         Dropdown:BuildDropdownList();
         Dropdown:Display();
@@ -3487,13 +3636,13 @@ do
         Parent = ScreenGui;
     });
 
-    Library:ApplyRound(WatermarkOuter, 10, 'OutlineColor');
+    Library:ApplyRound(WatermarkOuter, Library.Radius.Panel, 'OutlineColor');
 
     Library:AddToRegistry(WatermarkOuter, {
         BackgroundColor3 = 'BackgroundColor';
     });
 
-    Library:AddAccentBar(WatermarkOuter, 10, 201);
+    Library:AddAccentBar(WatermarkOuter, Library.Radius.Panel, 201);
 
     local WatermarkLabel = Library:CreateLabel({
         Position = UDim2.new(0, 8, 0, 0);
@@ -3534,13 +3683,13 @@ do
         Parent = ScreenGui;
     });
 
-    Library:ApplyRound(KeybindOuter, 10, 'OutlineColor');
+    Library:ApplyRound(KeybindOuter, Library.Radius.Panel, 'OutlineColor');
 
     Library:AddToRegistry(KeybindOuter, {
         BackgroundColor3 = 'MainColor';
     }, true);
 
-    Library:AddAccentBar(KeybindOuter, 10, 101);
+    Library:AddAccentBar(KeybindOuter, Library.Radius.Panel, 101);
 
     local KeybindInner = KeybindOuter;
 
@@ -3617,7 +3766,7 @@ function Library:Notify(Text, Time)
         Parent = Library.NotificationArea;
     });
 
-    Library:ApplyRound(NotifyOuter, 9, 'OutlineColor');
+    Library:ApplyRound(NotifyOuter, Library.Radius.Control, 'OutlineColor');
 
     local NotifyInner = Library:Create('Frame', {
         BackgroundTransparency = 1;
@@ -3733,8 +3882,8 @@ function Library:CreateWindow(...)
         Parent = ScreenGui;
     });
 
-    Library:ApplyRound(Outer, 10, 'OutlineColor');
-    Library:AddShadow(Outer, 10);
+    Library:ApplyRound(Outer, Library.Radius.Panel, 'OutlineColor');
+    Library:AddShadow(Outer, Library.Radius.Panel);
     Library:AddToRegistry(Outer, {
         BackgroundColor3 = 'MainColor';
     });
@@ -3841,7 +3990,7 @@ function Library:CreateWindow(...)
         Parent = Inner;
     });
 
-    Library:ApplyRound(TabBarOuter, 9, 'OutlineColor');
+    Library:ApplyRound(TabBarOuter, Library.Radius.Control, 'OutlineColor');
 
     Library:AddToRegistry(TabBarOuter, {
         BackgroundColor3 = 'BackgroundColor';
@@ -3886,7 +4035,7 @@ function Library:CreateWindow(...)
         Parent = TabBarInner;
     });
 
-    Library:AddCorner(TabSlider, 2);
+    Library:AddCorner(TabSlider, Library.Radius.Tiny);
     Library:AddToRegistry(TabSlider, {
         BackgroundColor3 = 'AccentColor';
     });
@@ -3923,7 +4072,7 @@ function Library:CreateWindow(...)
         Parent = Inner;
     });
 
-    Library:ApplyRound(MainSectionOuter, 9, 'OutlineColor');
+    Library:ApplyRound(MainSectionOuter, Library.Radius.Control, 'OutlineColor');
 
     Library:AddToRegistry(MainSectionOuter, {
         BackgroundColor3 = 'BackgroundColor';
@@ -3951,7 +4100,7 @@ function Library:CreateWindow(...)
         Parent = MainSectionInner;
     });
 
-    Library:ApplyRound(TabContainer, 9, 'OutlineColor');
+    Library:ApplyRound(TabContainer, Library.Radius.Control, 'OutlineColor');
 
     Library:AddToRegistry(TabContainer, {
         BackgroundColor3 = 'MainColor';
@@ -4106,8 +4255,8 @@ function Library:CreateWindow(...)
                 Parent = Info.Side == 1 and LeftSide or RightSide;
             });
 
-            Library:ApplyRound(BoxOuter, 10, 'OutlineColor');
-            Library:AddShadow(BoxOuter, 10);
+            Library:ApplyRound(BoxOuter, Library.Radius.Panel, 'OutlineColor');
+            Library:AddShadow(BoxOuter, Library.Radius.Panel);
 
             Library:AddToRegistry(BoxOuter, {
                 BackgroundColor3 = 'BackgroundColor';
@@ -4125,7 +4274,7 @@ function Library:CreateWindow(...)
                 BackgroundColor3 = 'BackgroundColor';
             });
 
-            local Highlight = Library:AddAccentBar(BoxOuter, 10, 2);
+            local Highlight = Library:AddAccentBar(BoxOuter, Library.Radius.Panel, 2);
 
             local GroupboxLabel = Library:CreateLabel({
                 Size = UDim2.new(1, 0, 0, 18);
@@ -4195,8 +4344,8 @@ function Library:CreateWindow(...)
                 Parent = Info.Side == 1 and LeftSide or RightSide;
             });
 
-            Library:ApplyRound(BoxOuter, 10, 'OutlineColor');
-            Library:AddShadow(BoxOuter, 10);
+            Library:ApplyRound(BoxOuter, Library.Radius.Panel, 'OutlineColor');
+            Library:AddShadow(BoxOuter, Library.Radius.Panel);
             BoxOuter.ClipsDescendants = true;
 
             Library:AddToRegistry(BoxOuter, {
@@ -4215,7 +4364,7 @@ function Library:CreateWindow(...)
                 BackgroundColor3 = 'BackgroundColor';
             });
 
-            Library:AddAccentBar(BoxOuter, 10, 3);
+            Library:AddAccentBar(BoxOuter, Library.Radius.Panel, 3);
 
             -- Nested tabs: accent bar on top of the active tab.
             local TabboxButtons = Library:Create('Frame', {
@@ -4244,7 +4393,7 @@ function Library:CreateWindow(...)
                 Parent = BoxInner;
             });
 
-            Library:AddCorner(NestedSlider, 2);
+            Library:AddCorner(NestedSlider, Library.Radius.Tiny);
             Library:AddToRegistry(NestedSlider, {
                 BackgroundColor3 = 'AccentColor';
             });
@@ -4283,7 +4432,7 @@ function Library:CreateWindow(...)
                     Parent = TabboxButtons;
                 });
 
-                Library:AddCorner(Button, 8);
+                Library:AddCorner(Button, Library.Radius.Control);
 
                 Library:AddToRegistry(Button, {
                     BackgroundColor3 = 'MainColor';
